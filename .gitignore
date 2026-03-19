@@ -1,0 +1,80 @@
+# =========================
+# 1. 环境与配置文件
+# =========================
+.env
+.env.local
+.env.*
+!.env.example
+
+# =========================
+# 2. 数据库与业务数据
+# =========================
+# ChromaDB 向量数据库持久化目录
+data/chroma_data/
+docker/data/
+
+# =========================
+# 3. 日志文件
+# =========================
+logs/
+*.log
+
+# =========================
+# 4. Python 缓存与虚拟环境
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 虚拟环境 (Poetry 默认或自定义的虚拟环境目录)
+.venv/
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =========================
+# 5. IDE 与编辑器配置文件
+# =========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.spyderproject
+.ropeproject
+
+# =========================
+# 6. 操作系统生成文件
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =========================
+# 7. 测试与覆盖率报告
+# =========================
+.pytest_cache/
+.tox/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
