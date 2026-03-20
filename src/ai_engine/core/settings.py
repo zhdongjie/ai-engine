@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # --- Prompts配置 ---
     PROMPTS_DATA_DIR: str = Field(default="resource/prompts")
-    
+
     # --- Knowledge配置 ---
     KNOWLEDGE_DATA_DIR: str = Field(default="resource/knowledge")
 
@@ -53,6 +53,18 @@ class Settings(BaseSettings):
     RERANK_THRESHOLD: float = Field(default=0.1, description="重排分数过滤阈值")
     RERANK_TOP_N: int = Field(default=3, description="重排后保留的最终片段数")
     VECTOR_SEARCH_TOP_K: int = Field(default=10, description="向量检索初筛抓取的片段数")
+
+    # --- PostgreSQL 数据库配置 ---
+    PG_USER: str = Field(default="postgres", description="PostgreSQL 数据库用户名")
+    PG_PASSWORD: str = Field(default="password", description="PostgreSQL 数据库密码")
+    PG_HOST: str = Field(default="127.0.0.1", description="PostgreSQL 数据库主机地址 (例如 127.0.0.1 或 localhost)")
+    PG_PORT: int = Field(default=5432, description="PostgreSQL 数据库连接端口 (默认 5432)")
+    PG_DB: str = Field(default="ai_engine", description="PostgreSQL 数据库名称")
+
+    # --- 数据库连接池高级配置 ---
+    DB_POOL_SIZE: int = Field(default=20, description="数据库连接池的基础容量 (系统常驻的空闲连接数)")
+    DB_MAX_OVERFLOW: int = Field(default=30, description="连接池满时的最大溢出容量 (高并发峰值时允许临时多建的连接数)")
+    DB_ECHO: bool = Field(default=False, description="是否在控制台打印底层执行的 SQL 语句 (建议仅在 Debug 时开启)")
 
     # --- 智能路径寻址 ---
     @property
@@ -90,6 +102,11 @@ class Settings(BaseSettings):
     def get_prompt_path(self, filename: str) -> str:
         """获取具体某个 Prompt 文件的路径"""
         return os.path.join(self.prompt_dir, filename)
+
+    @property
+    def postgres_url(self) -> str:
+        """生成异步 PostgreSQL 连接字符串 (使用顶级性能的 asyncpg 驱动)"""
+        return f"postgresql+asyncpg://{self.PG_USER}:{self.PG_PASSWORD}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
 
     # ===============================
     # Settings 行为配置

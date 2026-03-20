@@ -2,11 +2,12 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from langserve import add_routes
-
+from sqlalchemy import text
 # 1. 引入你的核心基座
 from ai_engine.core.settings import settings
 from ai_engine.core.logger import logger
 from ai_engine.chains.chat_chain import chat_chain
+from ai_engine.infra.db.pgsql import db_manager
 
 # 引入知识库初始化逻辑
 from scripts.init_knowledge_db import run_init as init_knowledge_db
@@ -19,23 +20,35 @@ async def lifespan(_: FastAPI):
     企业级生命周期管理：在应用启动前做检查，在关闭后做清理
     """
     logger.info(f"🚀 {settings.PROJECT_NAME} 引擎正在启动...")
-    logger.info(f"📂 当前项目根目录: {settings.project_root_dir}")
 
-    # 自动初始化检查：如果本地没数据，启动时自动向量化
+    # --- 🚀 阶段 1：初始化 PostgreSQL 连接池 ---
+    try:
+        db_manager.init_db()
+
+        async with db_manager.session_context() as session:
+            await session.execute(text("SELECT 1"))
+        logger.success("✅ PostgreSQL 数据库连接成功")
+    except Exception as e:
+        logger.critical(f"❌ PostgreSQL 初始化失败: {e}")
+        raise e
+
+    # --- 🚀 阶段 2：初始化 Chroma 向量知识库 ---
     if not os.path.exists(settings.chroma_persist_dir):
-        logger.warning(f"📦 路径 {settings.chroma_persist_dir} 未检测到向量数据，开始执行首次初始化...")
+        logger.warning(f"📦 未检测到向量数据，开始执行首次初始化...")
         try:
             init_knowledge_db()
             logger.success("✅ 业务文档向量化完成，ChromaDB 已就绪！")
         except Exception as e:
-            logger.critical(f"❌ 知识库初始化失败，系统无法正常提供 RAG 服务: {e}")
-            # 在生产环境中，这里可以选择是否强行关闭应用
+            logger.critical(f"❌ 知识库初始化失败: {e}")
     else:
         logger.info("📦 检测到现有的 Chroma 向量数据库，跳过初始化。")
 
-    yield  # 应用在此处运行
+    yield  # 应用在此处运行，接受 HTTP 请求
 
+    # --- 🛑 关闭阶段：清理资源 ---
     logger.info(f"🛑 {settings.PROJECT_NAME} 正在关闭并释放资源...")
+    # 👇 记得断开 PostgreSQL 连接池
+    await db_manager.close_db()
 
 
 # --- B. 实例化 FastAPI ---
@@ -65,5 +78,6 @@ async def health_check():
     return {
         "status": "online",
         "version": settings.PROJECT_VERSION,
-        "database": "ChromaDB Connected"
+        "vector_db": "ChromaDB Connected",
+        "relational_db": "PostgreSQL Connected"
     }
