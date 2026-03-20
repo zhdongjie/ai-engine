@@ -1,3 +1,4 @@
+# src/ai_engine/chains/chat_chain.py
 import uuid
 from typing import List, Tuple
 
@@ -142,10 +143,10 @@ async def adynamic_rag_run(input_data: dict) -> AIMessage:
     return AIMessage(
         content=answer,
         additional_kwargs={
-            "sources": sources,             # 把文档来源数组存进元数据
-            "biz_type": biz_type,           # 把业务路由标识存进元数据
-            "has_context": bool(context),   # 标记这次回答是否真的用到了知识库
-            "token_usage": token_usage      # 记录Token消耗
+            "sources": sources,  # 把文档来源数组存进元数据
+            "biz_type": biz_type,  # 把业务路由标识存进元数据
+            "has_context": bool(context),  # 标记这次回答是否真的用到了知识库
+            "token_usage": token_usage  # 记录Token消耗
         }
     )
 

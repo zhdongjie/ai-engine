@@ -1,3 +1,4 @@
+# src/ai_engine/infra/llm/message_adapter.py
 import uuid
 from typing import List, Sequence
 

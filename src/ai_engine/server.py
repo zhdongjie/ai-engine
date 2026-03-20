@@ -1,14 +1,16 @@
+# src/ai_engine/server.py
 import os
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from langserve import add_routes
 from sqlalchemy import text
+
+from ai_engine.chains.chat_chain import chat_chain
+from ai_engine.core.logger import logger
 # 1. 引入你的核心基座
 from ai_engine.core.settings import settings
-from ai_engine.core.logger import logger
-from ai_engine.chains.chat_chain import chat_chain
 from ai_engine.infra.db.pgsql import db_manager
-
 # 引入知识库初始化逻辑
 from scripts.init_knowledge_db import run_init as init_knowledge_db
 

@@ -1,4 +1,6 @@
+# src/ai_engine/models/chat_session.py
 from typing import List, Optional, TYPE_CHECKING
+
 from sqlmodel import Field, Relationship
 
 from ai_engine.infra.db.base_model import BaseModel

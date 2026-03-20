@@ -1,9 +1,11 @@
 # src/ai_engine/core/prompt_manager.py
 import os
+from typing import Any, Dict
+
 import yaml
-from typing import Any, Dict, Tuple
-from ai_engine.core.settings import settings
+
 from ai_engine.core.logger import logger
+from ai_engine.core.settings import settings
 
 
 def _read_prompt_file(prompt_name: str) -> Dict[str, Any] | None:

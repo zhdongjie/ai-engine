@@ -1,3 +1,4 @@
+# src/ai_engine/infra/db/base_model.py
 from uuid import UUID, uuid4
 
 from sqlmodel import SQLModel, Field

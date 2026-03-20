@@ -1,3 +1,4 @@
+# src/ai_engine/models/chat_message.py
 from typing import Dict, Any, Optional, TYPE_CHECKING
 from uuid import UUID
 

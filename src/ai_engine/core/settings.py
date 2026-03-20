@@ -1,3 +1,4 @@
+# src/ai_engine/core/sittings.py
 import os
 
 from pydantic import Field
