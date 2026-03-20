@@ -1,13 +1,14 @@
 # src/ai_engine/chains/chat_chain.py
+import asyncio
 import uuid
-from typing import List, Tuple
+from typing import List, Tuple, AsyncIterator, Dict, Any
 
 from dashscope import TextReRank
 from langchain_chroma import Chroma
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables import RunnableLambda, ConfigurableFieldSpec
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
@@ -22,8 +23,6 @@ from ai_engine.infra.llm.message_adapter import PostgresAsyncChatMessageHistory
 class ChatInput(BaseModel):
     input: str = Field(..., description="用户的纯文本提问")
     biz_type: str = Field(default="virtual_card", description="业务类型标识符")
-    # 🔥 建议前端也把 session_id 传在 query 或者 header 里，LangServe 默认使用 header 或 config 取
-    # session_id: str = Field(..., description="会话ID") 
 
 
 # --- 1. 全局 Embedding 初始化 ---
@@ -35,9 +34,9 @@ embeddings = OpenAIEmbeddings(
 )
 
 
-# --- 2. 增强型工具函数 (保持不变) ---
+# --- 2. 增强型工具函数 ---
 def get_reranked_docs(query: str, initial_docs: list) -> list:
-    # ... (你的原代码保持完全不变) ...
+    """针对 gte-rerank-v2 优化的重排函数"""
     if not initial_docs:
         return []
 
@@ -51,6 +50,7 @@ def get_reranked_docs(query: str, initial_docs: list) -> list:
             api_key=settings.QWEN_API_KEY
         )
         if resp.status_code != 200:
+            logger.error(f"Rerank API 报错: {resp.message}")
             return initial_docs[:2]
 
         final_docs = []
@@ -68,23 +68,25 @@ def get_reranked_docs(query: str, initial_docs: list) -> list:
         return initial_docs[:2]
 
 
-def format_docs_with_sources(docs) -> Tuple[str, List[str]]:
-    # ... (你的原代码保持完全不变) ...
-    if not docs: return "", []
+def format_docs_with_sources(docs: list) -> Tuple[str, List[str]]:
+    """同时格式化文档内容和提取不重复的文件来源"""
+    if not docs:
+        return "", []
     context = "\n\n".join(doc.page_content for doc in docs)
     sources = sorted(list(set(doc.metadata.get("file_name", "未知文档") for doc in docs)))
     return context, sources
 
 
-# --- 3. 核心逻辑：⚡ 纯异步化改造 ---
-# 注意这里变成了 async def
-async def adynamic_rag_run(input_data: dict) -> AIMessage:
-    """原子化执行：海选 -> 精选(Rerank) -> 组装 -> 运行"""
+# --- 3. 核心逻辑：纯异步流式改造 ---
+async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMessage]:
+    """
+    原子化执行：海选 -> 精选(Rerank) -> 组装 -> 运行 (支持流式产出)
+    """
     biz_type = input_data.get("biz_type", "virtual_card")
-    user_input = input_data.get("input")
+    user_input = input_data.get("input", "")
     history = input_data.get("history", [])
 
-    # A. 异步海选 (使用 ainvoke)
+    # A. 异步海选 (使用 ainvoke 保持异步非阻塞)
     vectorstore = Chroma(
         persist_directory=settings.chroma_persist_dir,
         embedding_function=embeddings
@@ -93,76 +95,66 @@ async def adynamic_rag_run(input_data: dict) -> AIMessage:
     initial_docs = await vectorstore.as_retriever(
         search_kwargs={"k": 10, "filter": {"biz_type": biz_type}}
     ).ainvoke(user_input)
+    logger.debug(f"召回阶段完成，原始文档数: {len(initial_docs)}")
 
-    # B. 精选 (Dashscope 目前是同步 API，这里直接调，如果追求极致性能未来可以用 asyncio.to_thread 包装)
-    final_docs = get_reranked_docs(user_input, initial_docs)
+    # B. 精选
+    final_docs = await asyncio.to_thread(get_reranked_docs, user_input, initial_docs)
+    logger.info(f"重排阶段完成，剩余精选文档: {len(final_docs)}")
 
     # C. 格式化
     context, sources = format_docs_with_sources(final_docs)
 
     # D. 获取业务配置与 Prompt
     prompt_data = get_prompt_config(biz_type)
-    instruction = prompt_data["content"]
-    biz_config = prompt_data["config"]
 
-    # E. 实例化局部 LLM
+    # E. 实例化局部 LLM (开启流式与计费统计)
     llm = ChatOpenAI(
         api_key=settings.QWEN_API_KEY,
         base_url=settings.QWEN_API_BASE,
-        model=biz_config.get("model", settings.QWEN_MODEL_LLM),
-        temperature=biz_config.get("temperature", settings.TEMPERATURE),
+        model=prompt_data["config"].get("model", settings.QWEN_MODEL_LLM),
+        temperature=settings.TEMPERATURE,
         streaming=True,
         model_kwargs={"stream_options": {"include_usage": True}}
     )
 
     prompt_template = ChatPromptTemplate.from_messages([
-        ("system", instruction),
+        ("system", prompt_data["content"]),
         MessagesPlaceholder(variable_name="history"),
         ("human", "{input}")
     ])
 
-    # F. 异步执行 LLM (使用 ainvoke)
-    chain = prompt_template | llm
-    response_msg = await chain.ainvoke({
+    # F. 核心流式转发
+    async for chunk in (prompt_template | llm).astream({
         "input": user_input,
         "history": history,
         "context": context
-    })
-    # 1. 提取文本内容
-    answer = response_msg.content
-
-    # 2. 提取 Token 消耗数据
-    token_usage = response_msg.usage_metadata or {}
-    if not token_usage and "token_usage" in response_msg.response_metadata:
-        token_usage = response_msg.response_metadata["token_usage"]
+    }):
+        yield chunk
 
     # G. 智能追加来源
     if context.strip() and sources:
-        answer += "\n\n> 💡 **参考来源**：" + "，".join(f"`{s}`" for s in sources)
+        source_text = "\n\n> 💡 **参考来源**：" + "，".join(f"`{s}`" for s in sources)
+        yield AIMessageChunk(**{"content": source_text})
 
-    return AIMessage(
-        content=answer,
-        additional_kwargs={
-            "sources": sources,  # 把文档来源数组存进元数据
-            "biz_type": biz_type,  # 把业务路由标识存进元数据
-            "has_context": bool(context),  # 标记这次回答是否真的用到了知识库
-            "token_usage": token_usage  # 记录Token消耗
+    # H. 注入元数据
+    meta_payload = {
+        "content": "",
+        "additional_kwargs": {
+            "sources": sources,
+            "biz_type": biz_type,
+            "has_context": bool(context)
         }
-    )
+    }
+    yield AIMessageChunk(**meta_payload)
 
 
 # --- 4. 组装 RAG 主链 ---
-# LangChain 会自动识别这是个异步函数
-rag_chain = RunnableLambda(adynamic_rag_run)
+rag_chain = RunnableLambda(adynamic_rag_run)  # type: ignore
 
 
-# --- 5. ⚡ 真实的 PostgreSQL 永久记忆接入 ---
-def get_session_history(session_id: str) -> BaseChatMessageHistory:
-    """
-    当 LangServe 接收到请求时，会带着前端传来的 session_id 调用这个函数。
-    我们直接返回连接到数据库的适配器。
-    """
-    # 简单的 UUID 格式校验与容错（如果前端没传标准的UUID，自动生成一个）
+# --- 5. 真实的 PostgreSQL 永久记忆接入 ---
+def get_session_history(session_id: str, tenant_id: str, user_id: str) -> BaseChatMessageHistory:
+    """根据 session_id 获取或创建异步数据库记忆适配器"""
     try:
         uuid.UUID(session_id)
         valid_session_id = session_id
@@ -172,15 +164,20 @@ def get_session_history(session_id: str) -> BaseChatMessageHistory:
 
     return PostgresAsyncChatMessageHistory(
         session_id=valid_session_id,
-        tenant_id="default_tenant",  # 未来可从 request headers 提取
-        user_id="default_user"  # 未来可从 request headers 提取
+        tenant_id=tenant_id,
+        user_id=user_id
     )
 
 
-# 最终导出的 Chain 对象
+# 最终导出的具有持久化记忆的对话链对象
 chat_chain = RunnableWithMessageHistory(
     rag_chain,  # type: ignore
     get_session_history,
     input_messages_key="input",
     history_messages_key="history",
+    history_factory_config=[
+        ConfigurableFieldSpec(id="session_id", annotation=str, is_shared=True),
+        ConfigurableFieldSpec(id="tenant_id", annotation=str, is_shared=True),
+        ConfigurableFieldSpec(id="user_id", annotation=str, is_shared=True),
+    ]
 ).with_types(input_type=ChatInput)

@@ -1,3 +1,4 @@
+# scripts/init_knowledge_db.py
 import os
 import shutil
 from pathlib import Path
