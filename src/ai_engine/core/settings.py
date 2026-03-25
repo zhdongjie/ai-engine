@@ -22,11 +22,13 @@ def project_root() -> str:
 class Settings(BaseSettings):
     # --- 项目基本信息 ---
     PROJECT_NAME: str = Field(default="AI-Engine")
+    PROJECT_DESCRIPTION: str = Field(default="基于 LangServe 与 RAG 架构的底层能力支撑 API")
     PROJECT_VERSION: str = Field(default="0.1.0")
     PROJECT_RELOAD: bool = Field(default=False, description="是否开启 Uvicorn 热重载")
     PROJECT_HOST: str = Field(default="127.0.0.1", description="服务监听地址")
     PROJECT_PORT: int = Field(default=8000, description="服务监听端口")
     MAX_HISTORY_MESSAGES: int = Field(default=20, description="对话历史截断限制")
+    ENABLE_LANGSERVE_EXTRAS: bool = Field(default=False, description="是否开启 LangServe 的辅助端点")
 
     # --- 日志配置 ---
     LOG_LEVEL: str = Field(default="INFO")
