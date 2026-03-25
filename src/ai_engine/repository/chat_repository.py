@@ -2,8 +2,9 @@
 import uuid
 from typing import List, Optional
 
+from sqlalchemy import update, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, asc
+from sqlmodel import select, asc, col
 
 from ai_engine.models.chat_message import ChatMessage
 from ai_engine.models.chat_session import ChatSession
@@ -72,6 +73,12 @@ class ChatRepository:
             extra=extra or {}
         )
         self.db.add(msg)
+        stmt = (
+            update(ChatSession)
+            .where(col(ChatSession.id) == session_id)
+            .values(updated_at=func.now())
+        )
+        await self.db.execute(stmt)
         await self.db.flush()
         return msg
 
@@ -82,11 +89,61 @@ class ChatRepository:
         stmt = (
             select(ChatMessage)
             .where(
-                ChatMessage.session_id == session_id,
-                ChatMessage.is_deleted == False
+                col(ChatMessage.session_id) == session_id,
+                col(ChatMessage.is_deleted) == False
             )
             .order_by(asc(ChatMessage.created_at))  # 按创建时间正序排，保证对话上下文不出错
             .limit(limit)
         )
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
+
+    async def get_user_sessions(
+            self,
+            user_id: str,
+            tenant_id: str = "default_tenant",
+            limit: int = 20,
+            offset: int = 0
+    ) -> List[ChatSession]:
+        """
+        分页获取用户的历史会话列表，按最后更新时间倒序排列。
+        过滤掉已逻辑删除的会话。
+        """
+        stmt = (
+            select(ChatSession)
+            .where(
+                col(ChatSession.user_id) == user_id,
+                col(ChatSession.tenant_id) == tenant_id,
+                col(ChatSession.is_deleted) == False  # 屏蔽已删除的会话
+            )
+            .order_by(desc(col(ChatSession.updated_at)))  # 最近聊过的排在最上面
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def delete_session(self, session_id: uuid.UUID) -> None:
+        """
+        逻辑删除整个会话（ChatSession）
+        """
+        stmt = (
+            update(ChatSession)
+            .where(col(ChatSession.id) == session_id)
+            .values(is_deleted=True)
+        )
+        await self.db.execute(stmt)
+        await self.clear_session_messages(session_id)
+        await self.db.flush()
+
+    async def clear_session_messages(self, session_id: uuid.UUID) -> None:
+        """
+        逻辑删除某个会话下的所有消息
+        """
+        stmt = (
+            update(ChatMessage)
+            .where(col(ChatMessage.session_id) == session_id)
+            .values(is_deleted=True)
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()

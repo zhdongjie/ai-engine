@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     PROJECT_RELOAD: bool = Field(default=False, description="是否开启 Uvicorn 热重载")
     PROJECT_HOST: str = Field(default="127.0.0.1", description="服务监听地址")
     PROJECT_PORT: int = Field(default=8000, description="服务监听端口")
+    MAX_HISTORY_MESSAGES: int = Field(default=20, description="对话历史截断限制")
 
     # --- 日志配置 ---
     LOG_LEVEL: str = Field(default="INFO")

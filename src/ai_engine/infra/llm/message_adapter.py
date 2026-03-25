@@ -11,6 +11,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from ai_engine.core.logger import logger
+from ai_engine.core.settings import settings
 # 引入全局单例的数据库连接管理器
 from ai_engine.infra.db.pgsql import db_manager
 # 引入仓储层处理数据库增删改查
@@ -70,6 +72,15 @@ class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
                     lc_messages.append(
                         ToolMessage(content=msg.content, tool_call_id=msg.name or "unknown_tool")
                     )
+
+            if len(lc_messages) > settings.MAX_HISTORY_MESSAGES:
+                # 截取最后的 MAX_HISTORY_MESSAGES 条
+                truncated_messages = lc_messages[-settings.MAX_HISTORY_MESSAGES:]
+                logger.debug(
+                    f"会话 {self.session_id} 历史记录超限 ({len(lc_messages)}条)，"
+                    f"已根据配置截断至最近 {settings.MAX_HISTORY_MESSAGES} 条。"
+                )
+                return truncated_messages
             return lc_messages
 
     async def aadd_messages(self, messages: Sequence[BaseMessage]) -> None:
@@ -145,5 +156,13 @@ class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
             await db.commit()
 
     async def aclear(self) -> None:
-        """清空会话（通常建议实现为软删除）"""
-        pass
+        """
+        清空当前会话的记忆：
+        调用仓储层对当前 session_id 的所有消息执行逻辑删除。
+        """
+        async with db_manager.session_context() as db:
+            repo = ChatRepository(db)
+            # 执行逻辑删除
+            await repo.clear_session_messages(self.session_id)
+            # 提交事务
+            await db.commit()

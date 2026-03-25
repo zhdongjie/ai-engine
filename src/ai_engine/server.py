@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from langserve import add_routes
 from sqlalchemy import text
 
+from ai_engine.api.chat_router import router as session_router
 from ai_engine.chains.chat_chain import chat_chain
 from ai_engine.core.logger import logger
 # 1. 引入你的核心基座
@@ -72,6 +73,9 @@ add_routes(
     # playground_type="chat",
     playground_type="default",
 )
+
+app.include_router(session_router)
+
 
 
 # 健康检查接口
