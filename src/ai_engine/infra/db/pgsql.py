@@ -17,12 +17,18 @@ logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """
-    PostgreSQL 异步连接池管理器 (企业级封装)
+    PostgreSQL 异步连接池管理器
     """
 
     def __init__(self):
         self._engine: AsyncEngine | None = None
         self._session_maker: async_sessionmaker[AsyncSession] | None = None
+
+    @property
+    def engine(self) -> AsyncEngine:
+        if self._engine is None:
+            raise RuntimeError("DB not initialized")
+        return self._engine
 
     def init_db(self) -> None:
         """
@@ -53,7 +59,7 @@ class DatabaseManager:
                 expire_on_commit=False,
                 autoflush=False  # 生产环境建议关闭自动 flush
             )
-            logger.info(f"✅ PostgreSQL 异步连接池初始化完成 (Pool Size: {settings.DB_POOL_SIZE})")
+            logger.info(f"PostgreSQL 异步连接池初始化完成 (Pool Size: {settings.DB_POOL_SIZE})")
 
     async def close_db(self) -> None:
         """
@@ -62,7 +68,7 @@ class DatabaseManager:
         if self._engine is not None:
             await self._engine.dispose()
             self._engine = None
-            logger.info("🛑 PostgreSQL 异步连接池已安全释放")
+            logger.info("PostgreSQL 异步连接池已安全释放")
 
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """

@@ -19,7 +19,7 @@ class ChatRepository:
         self.db = db
 
     # ==========================================
-    # 📝 Session (会话) 相关操作
+    # Session (会话) 相关操作
     # ==========================================
     async def get_session(self, session_id: uuid.UUID) -> Optional[ChatSession]:
         """根据 ID 获取会话记录"""
@@ -50,7 +50,7 @@ class ChatRepository:
         return session
 
     # ==========================================
-    # 💬 Message (消息) 相关操作
+    # Message (消息) 相关操作
     # ==========================================
     async def add_message(
             self,

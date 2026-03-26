@@ -30,5 +30,5 @@ async def agenerate_session_title(user_content: str) -> str:
         return clean_title[:10]
 
     except Exception as e:
-        logger.error(f"⚠️ 自动生成会话标题失败: {e}")
+        logger.error(f"自动生成会话标题失败: {e}")
         return "新对话"

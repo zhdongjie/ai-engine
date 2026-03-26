@@ -1,0 +1,39 @@
+services:
+  ai-engine:
+    build: .
+    container_name: ai-engine-app
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - ${ENV_FILE:-.env}
+    environment:
+      # 在 Docker 网络中，主机名直接用服务名 postgres
+      - PG_HOST=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # PostgreSQL 向量数据库
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: pgvector-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: local_postgresql
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+      - ./scripts/postgresql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgresql_data:
+    name: ai-engine-pgdata

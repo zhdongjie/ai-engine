@@ -85,4 +85,4 @@ def setup_logging():
         logging_logger.handlers = [InterceptHandler()]
         logging_logger.propagate = False  # 防止日志向上传递导致重复输出
 
-    logger.info(f"🚀 {settings.PROJECT_NAME} 日志系统初始化完成! 日志根目录: {settings.log_save_path}")
+    logger.info(f"{settings.PROJECT_NAME} 日志系统初始化完成! 日志根目录: {settings.log_save_path}")

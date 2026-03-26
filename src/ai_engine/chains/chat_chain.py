@@ -4,12 +4,11 @@ import uuid
 from typing import List, Tuple, AsyncIterator, Dict, Any
 
 from dashscope import TextReRank
-from langchain_chroma import Chroma
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
-from langchain_core.runnables import RunnableLambda, ConfigurableFieldSpec, RunnablePassthrough, RunnableBranch
+from langchain_core.runnables import RunnableLambda, ConfigurableFieldSpec, RunnablePassthrough
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
@@ -17,6 +16,7 @@ from pydantic import BaseModel, Field
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
 from ai_engine.core.settings import settings
+from ai_engine.infra.db.pgsql import db_manager
 from ai_engine.infra.llm.message_adapter import PostgresAsyncChatMessageHistory
 
 
@@ -83,12 +83,12 @@ async def anormal_chat_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
     """处理打招呼、写代码、常识等无需查库的纯通用对话"""
     user_input = input_data.get("input", "")
     history = input_data.get("history", [])
-    logger.debug("⚡ 进入 Normal Chat 模式，直接利用大模型本体能力回答...")
+    logger.debug("进入 Normal Chat 模式，直接利用大模型本体能力回答...")
 
-    # 🌟 1. 动态获取闲聊专属的 Prompt 和配置 (彻底消灭硬编码！)
+    # 1. 动态获取闲聊专属的 Prompt 和配置 (彻底消灭硬编码！)
     prompt_data = get_prompt_config("normal_chat")
 
-    # 🌟 2. 实例化局部 LLM (优先读取 YAML 里调高的温度，让闲聊更有创意)
+    # 2. 实例化局部 LLM (优先读取 YAML 里调高的温度，让闲聊更有创意)
     llm = ChatOpenAI(
         api_key=settings.QWEN_API_KEY.get_secret_value(),
         base_url=settings.QWEN_API_BASE,
@@ -98,7 +98,7 @@ async def anormal_chat_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
         model_kwargs={"stream_options": {"include_usage": True}}
     )
 
-    # 🌟 3. 使用 YAML 中的 content 组装系统提示词
+    # 3. 使用 YAML 中的 content 组装系统提示词
     prompt_template = ChatPromptTemplate.from_messages([
         ("system", prompt_data["content"]),
         MessagesPlaceholder(variable_name="history"),
@@ -116,7 +116,7 @@ async def anormal_chat_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
         "content": "",
         "additional_kwargs": {
             "sources": [],
-            "biz_type": "normal_chat",  # 动态标记业务类型为普通对话
+            "biz_type": "normal_chat",
             "has_context": False
         }
     }
@@ -131,16 +131,34 @@ async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
     biz_type = input_data.get("biz_type", "normal_chat")
     user_input = input_data.get("input", "")
     history = input_data.get("history", [])
-    logger.debug(f"📚 进入 RAG 模式，开始检索知识库 ({biz_type})...")
+    logger.debug(f"进入 RAG 模式，开始检索知识库 ({biz_type})...")
 
-    # A. 异步海选 (使用 ainvoke 保持异步非阻塞)
-    vectorstore = Chroma(
-        persist_directory=settings.chroma_persist_dir,
-        embedding_function=embeddings
+    # A. 异步海选
+    if settings.VECTOR_STORE_TYPE.lower() == "postgresql":
+        from langchain_postgres import PGVector
+        vectorstore = PGVector(
+            embeddings=embeddings,
+            collection_name="ai_knowledge_base",
+            connection=db_manager.engine,
+            use_jsonb=True,
+            create_extension=False,
+        )
+        logger.debug(f"检索底层引擎: PostgreSQL | biz_type: {biz_type}")
+    else:
+        from langchain_chroma import Chroma
+        vectorstore = Chroma(
+            persist_directory=settings.chroma_persist_dir,
+            embedding_function=embeddings
+        )
+        logger.debug(f"检索底层引擎: ChromaDB")
+
+    retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "k": settings.VECTOR_SEARCH_TOP_K
+        }
     )
-    initial_docs = await vectorstore.as_retriever(
-        search_kwargs={"k": 10, "filter": {"biz_type": biz_type}}
-    ).ainvoke(user_input)
+
+    initial_docs = await retriever.ainvoke(user_input)
     logger.debug(f"召回阶段完成，原始文档数: {len(initial_docs)}")
 
     # B. 精选
@@ -149,6 +167,10 @@ async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
 
     # C. 格式化
     context, sources = format_docs_with_sources(final_docs)
+
+    if final_docs:
+        biz_type = final_docs[0].metadata.get("biz_type", biz_type)
+        logger.info(f"💡 根据检索结果，动态切换 Prompt 模板至: [{biz_type}]")
 
     # D. 获取业务配置与 Prompt
     prompt_data = get_prompt_config(biz_type)
@@ -179,7 +201,7 @@ async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
 
     # G. 智能追加来源
     if context.strip() and sources:
-        source_text = "\n\n> 💡 **参考来源**：" + "，".join(f"`{s}`" for s in sources)
+        source_text = "\n\n> **参考来源**：" + "，".join(f"`{s}`" for s in sources)
         yield AIMessageChunk(**{"content": source_text})
 
     # H. 注入元数据

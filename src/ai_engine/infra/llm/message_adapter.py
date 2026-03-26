@@ -23,7 +23,7 @@ from ai_engine.repository.chat_repository import ChatRepository
 
 async def _background_generate_title(session_id: uuid.UUID, user_content: str):
     """后台独立任务：生成标题并更新数据库"""
-    logger.info(f"✨ 正在后台为会话 {session_id} 自动生成标题...")
+    logger.info(f"正在后台为会话 {session_id} 自动生成标题...")
 
     new_title = await agenerate_session_title(user_content)
 
@@ -31,7 +31,7 @@ async def _background_generate_title(session_id: uuid.UUID, user_content: str):
         repo = ChatRepository(db)
         await repo.update_session_title(session_id, new_title)
         await db.commit()
-        logger.success(f"✅ 会话 {session_id} 标题已成功更新为: 【{new_title}】")
+        logger.success(f"会话 {session_id} 标题已成功更新为: 【{new_title}】")
 
 
 class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
@@ -53,7 +53,7 @@ class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
         self.user_id = user_id
 
     # ==========================================
-    # 🚫 禁用同步方法，强制纯异步，保护事件循环
+    # 禁用同步方法，强制纯异步，保护事件循环
     # ==========================================
     @property
     def messages(self) -> List[BaseMessage]:

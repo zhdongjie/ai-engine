@@ -1,5 +1,6 @@
 # src/ai_engine/core/settings.py
 import os
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,7 +9,7 @@ def project_root() -> str:
     """动态计算项目根目录"""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     while current_dir:
-        if os.path.exists(os.path.join(current_dir, ".env")):
+        if os.path.exists(os.path.join(current_dir, ".env.prod")):
             return current_dir
         parent_dir = os.path.dirname(current_dir)
         if parent_dir == current_dir:
@@ -106,6 +107,18 @@ class Settings(BaseSettings):
     DB_ECHO: bool = Field(default=False, description="是否在控制台打印底层执行的 SQL 语句")
 
     # ===============================
+    # 向量数据库引擎切换
+    # ===============================
+    VECTOR_STORE_TYPE: str = Field(default="chroma", description="向量数据库引擎选择: 'chroma' 或 'postgresql'")
+
+    # ===============================
+    # 环境与初始化控制
+    # ===============================
+    # 是否在服务启动时强制重新初始化知识库
+    # 开发环境建议 True，生产环境务必 False
+    INIT_KNOWLEDGE_BASE: bool = Field(default=False, description="是否启动时初始化向量库")
+
+    # ===============================
     # 智能路径与 URL 寻址
     # ===============================
     @property
@@ -146,14 +159,19 @@ class Settings(BaseSettings):
 
     @property
     def postgres_url(self) -> str:
-        """生成异步 PostgreSQL 连接字符串 (使用顶级性能的 asyncpg 驱动)"""
+        """生成异步 PostgreSQL 连接字符串"""
         return f"postgresql+asyncpg://{self.PG_USER}:{self.PG_PASSWORD.get_secret_value()}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
+
+    @property
+    def sync_postgres_url(self):
+        """生成同步 PostgreSQL 连接字符串"""
+        return f"postgresql+psycopg://{self.PG_USER}:{self.PG_PASSWORD.get_secret_value()}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
 
     # ===============================
     # Settings 行为配置
     # ===============================
     model_config = SettingsConfigDict(
-        env_file=os.path.join(project_root(), ".env"),
+        env_file=os.path.join(project_root(), ".env.prod"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"
@@ -164,9 +182,9 @@ class Settings(BaseSettings):
 try:
     settings = Settings()
 
-    # 终极防御：如果加载完发现关键配置还是 None，说明 .env 内容不全
+    # 终极防御：如果加载完发现关键配置还是 None，说明 .env.prod 内容不全
     if not settings.QWEN_API_KEY:
-        raise ValueError(f"无法从环境变量或 .env 中读取 QWEN_API_KEY，加载路径: {os.path.join(project_root(), '.env')}")
+        raise ValueError(f"无法从环境变量或 .env.prod 中读取 QWEN_API_KEY，加载路径: {os.path.join(project_root(), '.env.prod')}")
 
 except Exception as e:
     print(f"❌ 配置文件加载失败！")

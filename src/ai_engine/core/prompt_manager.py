@@ -42,7 +42,7 @@ def _read_prompt_file(prompt_name: str) -> Dict[str, Any] | None:
                         "source": file_path
                     }
         except Exception as e:
-            logger.error(f"❌ 读取 Prompt 文件 {file_path} 出错: {e}")
+            logger.error(f"读取 Prompt 文件 {file_path} 出错: {e}")
             return None
     return None
 
@@ -56,18 +56,18 @@ def get_prompt_config(prompt_name: str = "default") -> Dict[str, Any]:
     result = _read_prompt_file(prompt_name)
 
     if result:
-        logger.debug(f"🎯 成功加载业务 Prompt: {prompt_name} (来自 {result['source']})")
+        logger.debug(f"成功加载业务 Prompt: {prompt_name} (来自 {result['source']})")
         return result
 
     # 2. 如果加载失败且当前不是 default，尝试加载 default 兜底
     if prompt_name != "default":
-        logger.warning(f"⚠️ 未找到业务 Prompt '{prompt_name}'，尝试加载母版 'default'...")
+        logger.warning(f"未找到业务 Prompt '{prompt_name}'，尝试加载母版 'default'...")
         default_result = _read_prompt_file("default")
         if default_result:
             return default_result
 
     # 3. 终极防御：如果连 default 都没有，返回代码硬编码的最小化指令
-    logger.error("🚨 严重警告：未找到任何 Prompt 文件（包括 default），使用系统硬编码兜底！")
+    logger.error("严重警告：未找到任何 Prompt 文件（包括 default），使用系统硬编码兜底！")
     return {
         "content": "你是一个专业的 AI 助手。请根据已知知识回答问题：\n\n{context}",
         "config": {"temperature": 0, "model": settings.QWEN_MODEL_LLM}
