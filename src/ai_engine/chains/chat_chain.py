@@ -7,8 +7,9 @@ from dashscope import TextReRank
 from langchain_chroma import Chroma
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import AIMessageChunk, BaseMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnableLambda, ConfigurableFieldSpec
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
+from langchain_core.runnables import RunnableLambda, ConfigurableFieldSpec, RunnablePassthrough, RunnableBranch
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
@@ -22,7 +23,7 @@ from ai_engine.infra.llm.message_adapter import PostgresAsyncChatMessageHistory
 # --- 0. 输入模型定义 ---
 class ChatInput(BaseModel):
     input: str = Field(..., description="用户的纯文本提问")
-    biz_type: str = Field(default="virtual_card", description="业务类型标识符")
+    biz_type: str = Field(default="normal_chat", description="业务类型标识符")
 
 
 # --- 1. 全局 Embedding 初始化 ---
@@ -77,21 +78,66 @@ def format_docs_with_sources(docs: list) -> Tuple[str, List[str]]:
     return context, sources
 
 
-# --- 3. 核心逻辑：纯异步流式改造 ---
+# --- 3. 核心双轨逻辑 A：纯净闲聊生成 (不查向量库) ---
+async def anormal_chat_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMessage]:
+    """处理打招呼、写代码、常识等无需查库的纯通用对话"""
+    user_input = input_data.get("input", "")
+    history = input_data.get("history", [])
+    logger.debug("⚡ 进入 Normal Chat 模式，直接利用大模型本体能力回答...")
+
+    # 🌟 1. 动态获取闲聊专属的 Prompt 和配置 (彻底消灭硬编码！)
+    prompt_data = get_prompt_config("normal_chat")
+
+    # 🌟 2. 实例化局部 LLM (优先读取 YAML 里调高的温度，让闲聊更有创意)
+    llm = ChatOpenAI(
+        api_key=settings.QWEN_API_KEY.get_secret_value(),
+        base_url=settings.QWEN_API_BASE,
+        model=prompt_data["config"].get("model", settings.QWEN_MODEL_LLM),
+        temperature=prompt_data["config"].get("temperature", 0.7),
+        streaming=True,
+        model_kwargs={"stream_options": {"include_usage": True}}
+    )
+
+    # 🌟 3. 使用 YAML 中的 content 组装系统提示词
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", prompt_data["content"]),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "{input}")
+    ])
+
+    async for chunk in (prompt_template | llm).astream({
+        "input": user_input,
+        "history": history
+    }):
+        yield chunk
+
+    # 注入元数据 (供 message_adapter 记录)
+    meta_payload = {
+        "content": "",
+        "additional_kwargs": {
+            "sources": [],
+            "biz_type": "normal_chat",  # 动态标记业务类型为普通对话
+            "has_context": False
+        }
+    }
+    yield AIMessageChunk(**meta_payload)
+
+
+# --- 4. 核心双轨逻辑 B：RAG 业务增强生成 (查库) ---
 async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMessage]:
     """
     原子化执行：海选 -> 精选(Rerank) -> 组装 -> 运行 (支持流式产出)
     """
-    biz_type = input_data.get("biz_type", "virtual_card")
+    biz_type = input_data.get("biz_type", "normal_chat")
     user_input = input_data.get("input", "")
     history = input_data.get("history", [])
+    logger.debug(f"📚 进入 RAG 模式，开始检索知识库 ({biz_type})...")
 
     # A. 异步海选 (使用 ainvoke 保持异步非阻塞)
     vectorstore = Chroma(
         persist_directory=settings.chroma_persist_dir,
         embedding_function=embeddings
     )
-    # 强制改为异步检索，防止阻塞
     initial_docs = await vectorstore.as_retriever(
         search_kwargs={"k": 10, "filter": {"biz_type": biz_type}}
     ).ainvoke(user_input)
@@ -107,12 +153,12 @@ async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
     # D. 获取业务配置与 Prompt
     prompt_data = get_prompt_config(biz_type)
 
-    # E. 实例化局部 LLM (开启流式与计费统计)
+    # E. 实例化局部 LLM
     llm = ChatOpenAI(
         api_key=settings.QWEN_API_KEY.get_secret_value(),
         base_url=settings.QWEN_API_BASE,
         model=prompt_data["config"].get("model", settings.QWEN_MODEL_LLM),
-        temperature=settings.TEMPERATURE,
+        temperature=prompt_data["config"].get("temperature", settings.TEMPERATURE),
         streaming=True,
         model_kwargs={"stream_options": {"include_usage": True}}
     )
@@ -148,11 +194,55 @@ async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
     yield AIMessageChunk(**meta_payload)
 
 
-# --- 4. 组装 RAG 主链 ---
-rag_chain = RunnableLambda(adynamic_rag_run)  # type: ignore
+# ==========================================
+# 5. 意图分类器 (Router) & 核心调度中枢
+# ==========================================
+# A. 初始化轻量级分类大模型
+router_config = get_prompt_config("intent_router")
+router_llm = ChatOpenAI(
+    model=router_config.get("config", {}).get("model", "qwen-turbo"),
+    api_key=settings.QWEN_API_KEY.get_secret_value(),
+    base_url=settings.QWEN_API_BASE,
+    temperature=router_config.get("config", {}).get("temperature", 0.0),
+    max_tokens=router_config.get("config", {}).get("max_tokens", 10)
+)
+router_prompt = PromptTemplate.from_template(router_config["content"])
+intent_router = router_prompt | router_llm | StrOutputParser()
 
 
-# --- 5. 真实的 PostgreSQL 永久记忆接入 ---
+def route_logger(info: dict) -> dict:
+    """日志探针：观察路由器的决策结果"""
+    intent = info.get("intent", "UNKNOWN").strip().upper()
+    logger.info(f"路由判定结果: [{intent}] | 用户输入: {info.get('input', '')[:15]}...")
+    return info
+
+
+# ------------------------------------------
+# 强类型动态路由函数
+# ------------------------------------------
+def route_logic(info: dict):
+    """
+    根据 intent 动态返回下一阶段的 Runnable 链路。
+    LangChain 会自动将当前上下文无缝传递给被返回的链路。
+    """
+    if "RAG" in info.get("intent", "").upper():
+        return RunnableLambda(adynamic_rag_run)
+
+    # 默认兜底分支
+    return RunnableLambda(anormal_chat_run)
+
+
+# B. 构建带交通管制功能的主链 (彻底抛弃 RunnableBranch)
+master_chain = (
+    # 1. 提取用户的输入进行意图分析，同时保留原始入参
+        RunnablePassthrough.assign(intent=intent_router)
+        # 2. 打印决策日志
+        | RunnableLambda(route_logger)
+        # 3. 核心分流：直接让 RunnableLambda 根据逻辑返回具体的子链
+        | RunnableLambda(route_logic)
+)
+
+# --- 6. 真实的 PostgreSQL 永久记忆接入 ---
 def get_session_history(session_id: str, tenant_id: str, user_id: str) -> BaseChatMessageHistory:
     """根据 session_id 获取或创建异步数据库记忆适配器"""
     try:
@@ -171,7 +261,7 @@ def get_session_history(session_id: str, tenant_id: str, user_id: str) -> BaseCh
 
 # 最终导出的具有持久化记忆的对话链对象
 chat_chain = RunnableWithMessageHistory(
-    rag_chain,  # type: ignore
+    master_chain,
     get_session_history,
     input_messages_key="input",
     history_messages_key="history",
