@@ -27,7 +27,7 @@ class ChatInput(BaseModel):
 
 # --- 1. 全局 Embedding 初始化 ---
 embeddings = OpenAIEmbeddings(
-    api_key=settings.QWEN_API_KEY,
+    api_key=settings.QWEN_API_KEY.get_secret_value(),
     base_url=settings.QWEN_API_BASE,
     model=settings.QWEN_MODEL_EMBEDDING,
     check_embedding_ctx_length=False
@@ -47,7 +47,7 @@ def get_reranked_docs(query: str, initial_docs: list) -> list:
             query=query,
             documents=documents_text,
             top_n=settings.RERANK_TOP_N,
-            api_key=settings.QWEN_API_KEY
+            api_key=settings.QWEN_API_KEY.get_secret_value(),
         )
         if resp.status_code != 200:
             logger.error(f"Rerank API 报错: {resp.message}")
@@ -109,7 +109,7 @@ async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
 
     # E. 实例化局部 LLM (开启流式与计费统计)
     llm = ChatOpenAI(
-        api_key=settings.QWEN_API_KEY,
+        api_key=settings.QWEN_API_KEY.get_secret_value(),
         base_url=settings.QWEN_API_BASE,
         model=prompt_data["config"].get("model", settings.QWEN_MODEL_LLM),
         temperature=settings.TEMPERATURE,

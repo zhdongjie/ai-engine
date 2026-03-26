@@ -16,7 +16,7 @@ def run_init():
 
     # 1. 初始化组件
     embeddings = OpenAIEmbeddings(
-        api_key=settings.QWEN_API_KEY,
+        api_key=settings.QWEN_API_KEY.get_secret_value(),
         base_url=settings.QWEN_API_BASE,
         model=settings.QWEN_MODEL_EMBEDDING,
         check_embedding_ctx_length=False,

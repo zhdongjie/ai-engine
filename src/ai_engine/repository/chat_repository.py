@@ -82,6 +82,16 @@ class ChatRepository:
         await self.db.flush()
         return msg
 
+    async def update_session_title(self, session_id: uuid.UUID, new_title: str) -> None:
+        """更新会话的标题"""
+        stmt = (
+            update(ChatSession)
+            .where(col(ChatSession.id) == session_id)
+            .values(title=new_title)
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
+
     async def get_session_messages(self, session_id: uuid.UUID, limit: int = 50) -> List[ChatMessage]:
         """
         获取某个会话的历史消息（自动过滤软删除，并按时间线正序排列）
