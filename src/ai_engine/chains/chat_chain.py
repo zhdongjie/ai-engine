@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
 from ai_engine.core.settings import settings
-from ai_engine.infra.db.pgsql import db_manager
-from ai_engine.infra.llm.message_adapter import PostgresAsyncChatMessageHistory
+from ai_engine.infra.db.vdb import vdb_manager
+from ai_engine.infra.llm.message_adapter import PostgresCustomChatMessageHistory
 
 
 # --- 0. 输入模型定义 ---
@@ -133,26 +133,7 @@ async def adynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMess
     history = input_data.get("history", [])
     logger.debug(f"进入 RAG 模式，开始检索知识库 ({biz_type})...")
 
-    # A. 异步海选
-    if settings.VECTOR_STORE_TYPE.lower() == "postgresql":
-        from langchain_postgres import PGVector
-        vectorstore = PGVector(
-            embeddings=embeddings,
-            collection_name="ai_knowledge_base",
-            connection=db_manager.engine,
-            use_jsonb=True,
-            create_extension=False,
-        )
-        logger.debug(f"检索底层引擎: PostgreSQL | biz_type: {biz_type}")
-    else:
-        from langchain_chroma import Chroma
-        vectorstore = Chroma(
-            persist_directory=settings.chroma_persist_dir,
-            embedding_function=embeddings
-        )
-        logger.debug(f"检索底层引擎: ChromaDB")
-
-    retriever = vectorstore.as_retriever(
+    retriever = vdb_manager.store.as_retriever(
         search_kwargs={
             "k": settings.VECTOR_SEARCH_TOP_K
         }
@@ -264,6 +245,7 @@ master_chain = (
         | RunnableLambda(route_logic)
 )
 
+
 # --- 6. 真实的 PostgreSQL 永久记忆接入 ---
 def get_session_history(session_id: str, tenant_id: str, user_id: str) -> BaseChatMessageHistory:
     """根据 session_id 获取或创建异步数据库记忆适配器"""
@@ -274,7 +256,7 @@ def get_session_history(session_id: str, tenant_id: str, user_id: str) -> BaseCh
         logger.warning(f"接收到非法的 session_id: {session_id}，已自动替换为新 UUID")
         valid_session_id = str(uuid.uuid4())
 
-    return PostgresAsyncChatMessageHistory(
+    return PostgresCustomChatMessageHistory(
         session_id=valid_session_id,
         tenant_id=tenant_id,
         user_id=user_id

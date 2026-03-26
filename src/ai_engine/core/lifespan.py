@@ -1,4 +1,3 @@
-import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -14,16 +13,16 @@ from scripts.init_knowledge_db import run_init as init_knowledge_db
 # ========================
 # 阶段 1：数据库初始化
 # ========================
-async def init_database():
+def init_database():
     db_manager.init_db()
 
-    async with db_manager.session_context() as session:
-        await session.execute(text("SELECT 1"))
+    with db_manager.session_context() as session:
+        session.execute(text("SELECT 1"))
 
         if settings.VECTOR_STORE_TYPE.lower() == "postgresql":
             logger.info("正在激活 PGVector 插件...")
-            await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            await session.commit()
+            session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            session.commit()
             logger.success("PostgreSQL & PGVector 就绪")
         else:
             logger.success("数据库连接成功")
@@ -32,7 +31,7 @@ async def init_database():
 # ========================
 # 阶段 2：知识库初始化
 # ========================
-async def init_knowledge_base():
+def init_knowledge_base():
     v_type = settings.VECTOR_STORE_TYPE.lower()
 
     should_init = (
@@ -47,7 +46,7 @@ async def init_knowledge_base():
     logger.warning("开始知识库初始化...")
 
     try:
-        await asyncio.to_thread(init_knowledge_db)
+        init_knowledge_db()
         logger.success("知识库初始化完成")
     except Exception as e:
         logger.error(f"知识库初始化失败: {e}")
@@ -61,8 +60,8 @@ async def app_lifespan(_: FastAPI):
     logger.info(f"{settings.PROJECT_NAME} 启动中...")
 
     try:
-        await init_database()
-        await init_knowledge_base()
+        init_database()
+        init_knowledge_base()
     except Exception as e:
         logger.critical(f"启动失败: {e}")
         raise
@@ -70,4 +69,4 @@ async def app_lifespan(_: FastAPI):
     yield
 
     logger.info(f"{settings.PROJECT_NAME} 关闭中...")
-    await db_manager.close_db()
+    db_manager.close_db()

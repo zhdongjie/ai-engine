@@ -10,10 +10,11 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader, Py
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-from sqlalchemy import text, create_engine
+from sqlalchemy import text
 
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
+from ai_engine.infra.db.pgsql import db_manager
 
 
 def load_documents() -> List:
@@ -101,7 +102,7 @@ def init_pgvector(embeddings, docs):
     """初始化 PGVector"""
     logger.info("清理 PostgreSQL 旧表...")
 
-    engine = create_engine(settings.sync_postgres_url)
+    engine = db_manager.engine
 
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS langchain_pg_embedding"))
@@ -110,8 +111,9 @@ def init_pgvector(embeddings, docs):
     vector_store = PGVector(
         embeddings=embeddings,
         collection_name="ai_knowledge_base",
-        connection=settings.sync_postgres_url,
+        connection=engine,
         use_jsonb=True,
+        create_extension=False,
     )
 
     logger.info(f"写入 {len(docs)} 条数据到 PGVector...")

@@ -1,6 +1,6 @@
 # src/ai_engine/infra/llm/message_adapter.py
-import asyncio
 import uuid
+import threading
 from typing import List, Sequence
 
 from langchain_core.chat_history import BaseChatMessageHistory
@@ -12,33 +12,34 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from ai_engine.chains.title_chain import agenerate_session_title
+from ai_engine.chains.title_chain import generate_session_title  # 假设你也把它改成同步了
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
-# 引入全局单例的数据库连接管理器
 from ai_engine.infra.db.pgsql import db_manager
-# 引入仓储层处理数据库增删改查
 from ai_engine.repository.chat_repository import ChatRepository
 
 
-async def _background_generate_title(session_id: uuid.UUID, user_content: str):
-    """后台独立任务：生成标题并更新数据库"""
+def _background_generate_title(session_id: uuid.UUID, user_content: str):
+    """后台独立线程任务：生成标题并更新数据库"""
     logger.info(f"正在后台为会话 {session_id} 自动生成标题...")
 
-    new_title = await agenerate_session_title(user_content)
+    try:
+        new_title = generate_session_title(user_content)
 
-    async with db_manager.session_context() as db:
-        repo = ChatRepository(db)
-        await repo.update_session_title(session_id, new_title)
-        await db.commit()
-        logger.success(f"会话 {session_id} 标题已成功更新为: 【{new_title}】")
+        with db_manager.session_context() as db:
+            repo = ChatRepository(db)
+            repo.update_session_title(session_id, new_title)
+            db.commit()
+            logger.success(f"会话 {session_id} 标题已成功更新为: 【{new_title}】")
+    except Exception as e:
+        logger.error(f"后台生成标题失败: {e}")
 
 
-class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
+class PostgresCustomChatMessageHistory(BaseChatMessageHistory):
     """
-    企业级纯异步 LangChain 记忆适配器：
+    企业级同步 LangChain 记忆适配器：
     将 LangChain 的内存消息对象与 PostgreSQL 数据库无缝双向绑定。
-    支持流式输出后的 Token 聚合统计与元数据持久化。
+    支持 Token 聚合统计与元数据持久化。
     """
 
     def __init__(
@@ -47,80 +48,52 @@ class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
             tenant_id: str = "default_tenant",
             user_id: str = "anonymous",
     ):
-        # 确保传入的 session_id 是合法的 UUID
         self.session_id = uuid.UUID(session_id)
         self.tenant_id = tenant_id
         self.user_id = user_id
 
-    # ==========================================
-    # 禁用同步方法，强制纯异步，保护事件循环
-    # ==========================================
     @property
     def messages(self) -> List[BaseMessage]:
-        raise NotImplementedError("高并发架构下严禁使用同步查询，请使用 await history.aget_messages()")
-
-    def add_messages(self, messages: Sequence[BaseMessage]) -> None:
-        raise NotImplementedError("高并发架构下严禁使用同步写入，请使用 await history.aadd_messages()")
-
-    def clear(self) -> None:
-        raise NotImplementedError("高并发架构下严禁使用同步操作，请使用 await history.aclear()")
-
-    # ==========================================
-    # ⚡ 核心异步实现 (被 LangChain 自动调用)
-    # ==========================================
-    async def aget_messages(self) -> List[BaseMessage]:
-        """从 PostgreSQL 读取当前会话的历史记录"""
-        async with db_manager.session_context() as db:
+        """LangChain 要求的同步属性：读取历史记录"""
+        with db_manager.session_context() as db:
             repo = ChatRepository(db)
-            db_messages = await repo.get_session_messages(self.session_id)
+            db_messages = repo.get_session_messages(self.session_id)
 
             lc_messages = []
             for msg in db_messages:
                 if msg.role == "user":
                     lc_messages.append(HumanMessage(content=msg.content))
                 elif msg.role == "assistant":
-                    # 将存储在 extra 中的元数据还原到消息对象中
                     lc_messages.append(AIMessage(content=msg.content, additional_kwargs=msg.extra))
                 elif msg.role == "system":
                     lc_messages.append(SystemMessage(content=msg.content))
                 elif msg.role == "tool":
-                    lc_messages.append(
-                        ToolMessage(content=msg.content, tool_call_id=msg.name or "unknown_tool")
-                    )
+                    lc_messages.append(ToolMessage(content=msg.content, tool_call_id=msg.name or "unknown_tool"))
 
             if len(lc_messages) > settings.MAX_HISTORY_MESSAGES:
-                # 截取最后的 MAX_HISTORY_MESSAGES 条
                 truncated_messages = lc_messages[-settings.MAX_HISTORY_MESSAGES:]
-                logger.debug(
-                    f"会话 {self.session_id} 历史记录超限 ({len(lc_messages)}条)，"
-                    f"已根据配置截断至最近 {settings.MAX_HISTORY_MESSAGES} 条。"
-                )
+                logger.debug(f"会话 {self.session_id} 历史超限，截断至 {settings.MAX_HISTORY_MESSAGES} 条。")
                 return truncated_messages
+
             return lc_messages
 
-    async def aadd_messages(self, messages: Sequence[BaseMessage]) -> None:
-        """
-        持久化新消息。
-        优化点：捕获流式聚合后的 usage_metadata (Token) 和手动注入的业务标识。
-        """
-        async with db_manager.session_context() as db:
+    def add_messages(self, messages: Sequence[BaseMessage]) -> None:
+        """LangChain 要求的同步方法：写入新消息"""
+        with db_manager.session_context() as db:
             repo = ChatRepository(db)
 
-            # 1. 动态确定业务类型 (从 AI 消息中提取我们在 chat_chain 注入的标识)
             biz_type = "default"
             for m in messages:
                 if isinstance(m, AIMessage) and m.additional_kwargs:
                     biz_type = m.additional_kwargs.get("biz_type", biz_type)
 
-            # 2. 确保当前会话存在 (记录下返回的 session 对象，后面判断标题要用)
-            session = await repo.get_or_create_session(
+            session = repo.get_or_create_session(
                 session_id=self.session_id,
                 tenant_id=self.tenant_id,
                 user_id=self.user_id,
                 biz_type=biz_type
             )
 
-            # 3. 遍历 LangChain 传过来的消息，并逐一翻译
             for msg in messages:
                 role = "user"
                 name = None
@@ -130,19 +103,14 @@ class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
                     role = "user"
                 elif isinstance(msg, AIMessage):
                     role = "assistant"
-                    # A. 提取手动注入的元数据 (如 sources, biz_type, has_context)
                     if msg.additional_kwargs:
                         extra.update(msg.additional_kwargs)
-
-                    # B. 提取 LLM 响应元数据 (如 model_name)
                     if msg.response_metadata:
                         extra.update(msg.response_metadata)
 
-                    # C. 关键：提取流式聚合后的标准 Token 统计数据 (LangChain 0.2+ 推荐方式)
                     usage = getattr(msg, "usage_metadata", None)
                     if usage:
                         extra["token_usage"] = usage
-                    # 备选方案：如果 usage_metadata 为空，尝试从 response_metadata 寻找
                     elif "token_usage" in msg.response_metadata:
                         extra["token_usage"] = msg.response_metadata["token_usage"]
 
@@ -152,11 +120,9 @@ class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
                     role = "tool"
                     name = msg.tool_call_id
 
-                # 确保内容为字符串
                 content_str = msg.content if isinstance(msg.content, str) else str(msg.content)
 
-                # 写入持久化层
-                await repo.add_message(
+                repo.add_message(
                     session_id=self.session_id,
                     tenant_id=self.tenant_id,
                     user_id=self.user_id,
@@ -166,25 +132,21 @@ class PostgresAsyncChatMessageHistory(BaseChatMessageHistory):
                     extra=extra
                 )
 
-            await db.commit()
+            db.commit()
 
-        if session.title == "新对话":
+        # 使用 Python 原生线程替代 asyncio.create_task 处理后台任务
+        if getattr(session, "title", "") == "新对话":
             human_msgs = [m for m in messages if isinstance(m, HumanMessage)]
             if human_msgs:
-                # 获取用户这一轮输入的内容
-                first_human_content = human_msgs[0].content
-                asyncio.create_task(
-                    _background_generate_title(self.session_id, first_human_content)
-                )
+                threading.Thread(
+                    target=_background_generate_title,
+                    args=(self.session_id, human_msgs[0].content),
+                    daemon=True
+                ).start()
 
-    async def aclear(self) -> None:
-        """
-        清空当前会话的记忆：
-        调用仓储层对当前 session_id 的所有消息执行逻辑删除。
-        """
-        async with db_manager.session_context() as db:
+    def clear(self) -> None:
+        """清空会话 (逻辑删除)"""
+        with db_manager.session_context() as db:
             repo = ChatRepository(db)
-            # 执行逻辑删除
-            await repo.clear_session_messages(self.session_id)
-            # 提交事务
-            await db.commit()
+            repo.clear_session_messages(self.session_id)
+            db.commit()

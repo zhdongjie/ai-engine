@@ -3,7 +3,7 @@ import uuid
 from typing import List, Optional
 
 from sqlalchemy import update, desc, func
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlmodel import select, asc, col
 
 from ai_engine.models.chat_message import ChatMessage
@@ -15,17 +15,17 @@ class ChatRepository:
     聊天仓储类：集中处理 Session 和 Message 的数据库增删改查
     """
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
     # ==========================================
     # Session (会话) 相关操作
     # ==========================================
-    async def get_session(self, session_id: uuid.UUID) -> Optional[ChatSession]:
+    def get_session(self, session_id: uuid.UUID) -> Optional[ChatSession]:
         """根据 ID 获取会话记录"""
-        return await self.db.get(ChatSession, session_id)
+        return self.db.get(ChatSession, session_id)
 
-    async def get_or_create_session(
+    def get_or_create_session(
             self,
             session_id: uuid.UUID,
             tenant_id: str,
@@ -36,7 +36,7 @@ class ChatRepository:
         获取会话，如果不存在则自动创建 (Get or Create)。
         这是大模型应用极其常用的逻辑：用户第一次发消息时，自动为他建一个 Session。
         """
-        session = await self.get_session(session_id)
+        session = self.get_session(session_id)
         if not session:
             session = ChatSession(
                 id=session_id,
@@ -46,13 +46,13 @@ class ChatRepository:
                 title="新对话"
             )
             self.db.add(session)
-            await self.db.flush()  # flush 会把 SQL 发给数据库并拿到默认值，但还未 commit
+            self.db.flush()  # flush 会把 SQL 发给数据库并拿到默认值，但还未 commit
         return session
 
     # ==========================================
     # Message (消息) 相关操作
     # ==========================================
-    async def add_message(
+    def add_message(
             self,
             session_id: uuid.UUID,
             tenant_id: str,
@@ -78,21 +78,21 @@ class ChatRepository:
             .where(col(ChatSession.id) == session_id)
             .values(updated_at=func.now())
         )
-        await self.db.execute(stmt)
-        await self.db.flush()
+        self.db.execute(stmt)
+        self.db.flush()
         return msg
 
-    async def update_session_title(self, session_id: uuid.UUID, new_title: str) -> None:
+    def update_session_title(self, session_id: uuid.UUID, new_title: str) -> None:
         """更新会话的标题"""
         stmt = (
             update(ChatSession)
             .where(col(ChatSession.id) == session_id)
             .values(title=new_title)
         )
-        await self.db.execute(stmt)
-        await self.db.flush()
+        self.db.execute(stmt)
+        self.db.flush()
 
-    async def get_session_messages(self, session_id: uuid.UUID, limit: int = 50) -> List[ChatMessage]:
+    def get_session_messages(self, session_id: uuid.UUID, limit: int = 50) -> List[ChatMessage]:
         """
         获取某个会话的历史消息（自动过滤软删除，并按时间线正序排列）
         """
@@ -105,10 +105,10 @@ class ChatRepository:
             .order_by(asc(ChatMessage.created_at))  # 按创建时间正序排，保证对话上下文不出错
             .limit(limit)
         )
-        result = await self.db.execute(stmt)
+        result = self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_user_sessions(
+    def get_user_sessions(
             self,
             user_id: str,
             tenant_id: str = "default_tenant",
@@ -130,10 +130,10 @@ class ChatRepository:
             .limit(limit)
             .offset(offset)
         )
-        result = await self.db.execute(stmt)
+        result = self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def delete_session(self, session_id: uuid.UUID) -> None:
+    def delete_session(self, session_id: uuid.UUID) -> None:
         """
         逻辑删除整个会话（ChatSession）
         """
@@ -142,11 +142,11 @@ class ChatRepository:
             .where(col(ChatSession.id) == session_id)
             .values(is_deleted=True)
         )
-        await self.db.execute(stmt)
-        await self.clear_session_messages(session_id)
-        await self.db.flush()
+        self.db.execute(stmt)
+        self.clear_session_messages(session_id)
+        self.db.flush()
 
-    async def clear_session_messages(self, session_id: uuid.UUID) -> None:
+    def clear_session_messages(self, session_id: uuid.UUID) -> None:
         """
         逻辑删除某个会话下的所有消息
         """
@@ -155,5 +155,5 @@ class ChatRepository:
             .where(col(ChatMessage.session_id) == session_id)
             .values(is_deleted=True)
         )
-        await self.db.execute(stmt)
-        await self.db.flush()
+        self.db.execute(stmt)
+        self.db.flush()

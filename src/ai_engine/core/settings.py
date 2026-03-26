@@ -158,11 +158,6 @@ class Settings(BaseSettings):
         return os.path.join(self.prompt_dir, filename)
 
     @property
-    def postgres_url(self) -> str:
-        """生成异步 PostgreSQL 连接字符串"""
-        return f"postgresql+asyncpg://{self.PG_USER}:{self.PG_PASSWORD.get_secret_value()}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
-
-    @property
     def sync_postgres_url(self):
         """生成同步 PostgreSQL 连接字符串"""
         return f"postgresql+psycopg://{self.PG_USER}:{self.PG_PASSWORD.get_secret_value()}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
@@ -182,9 +177,10 @@ class Settings(BaseSettings):
 try:
     settings = Settings()
 
-    # 终极防御：如果加载完发现关键配置还是 None，说明 .env.prod 内容不全
+    # 终极防御：如果加载完发现关键配置还是 None，说明 .env 内容不全
     if not settings.QWEN_API_KEY:
-        raise ValueError(f"无法从环境变量或 .env.prod 中读取 QWEN_API_KEY，加载路径: {os.path.join(project_root(), '.env.prod')}")
+        raise ValueError(
+            f"无法从环境变量或 .env 中读取 QWEN_API_KEY，加载路径: {os.path.join(project_root(), '.env.prod')}")
 
 except Exception as e:
     print(f"❌ 配置文件加载失败！")

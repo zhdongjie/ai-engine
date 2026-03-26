@@ -8,7 +8,7 @@ from ai_engine.core.prompt_manager import get_prompt_config
 from ai_engine.core.settings import settings
 
 
-async def agenerate_session_title(user_content: str) -> str:
+def generate_session_title(user_content: str) -> str:
     try:
         prompt_data = get_prompt_config("session_title")
         prompt_config = prompt_data.get("config", {})
@@ -24,10 +24,12 @@ async def agenerate_session_title(user_content: str) -> str:
         prompt = PromptTemplate.from_template(prompt_data["content"])
         chain = prompt | llm | StrOutputParser()
 
-        title = await chain.ainvoke({"user_content": user_content})
+        title = chain.invoke({"user_content": user_content})
 
-        clean_title = title.strip(' 。，、"\'”“\n')
-        return clean_title[:10]
+        if isinstance(title, str):
+            title = title.strip(' 。，、"\'”“\n')
+
+        return title[:10]
 
     except Exception as e:
         logger.error(f"自动生成会话标题失败: {e}")
