@@ -1,6 +1,6 @@
 # src/ai_engine/infra/llm/message_adapter.py
-import uuid
 import threading
+import uuid
 from typing import List, Sequence
 
 from langchain_core.chat_history import BaseChatMessageHistory

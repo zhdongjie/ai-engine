@@ -35,8 +35,8 @@ def init_knowledge_base():
     v_type = settings.VECTOR_STORE_TYPE.lower()
 
     should_init = (
-        settings.INIT_KNOWLEDGE_BASE
-        or (v_type != "postgresql" and not os.path.exists(settings.chroma_persist_dir))
+            settings.INIT_KNOWLEDGE_BASE
+            or (v_type != "postgresql" and not os.path.exists(settings.chroma_persist_dir))
     )
 
     if not should_init:
