@@ -30,8 +30,6 @@ WORKDIR /app
 # 复制依赖文件并安装 (利用 Docker 层缓存)
 COPY pyproject.toml poetry.lock ./
 
-RUN cat pyproject.toml
-
 RUN poetry install --no-root --only main
 
 # --- 阶段 2: 运行阶段 (Final) ---

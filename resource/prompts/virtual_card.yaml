@@ -5,6 +5,8 @@ config:
   model: "qwen-max"
   temperature: 0
   max_tokens: 1000
+
+retrieval_config:
   k: 3
 
 content: |
