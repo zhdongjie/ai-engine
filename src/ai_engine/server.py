@@ -2,10 +2,10 @@
 from fastapi import FastAPI
 from langserve import add_routes
 
-from ai_engine.api.chat_router import router as session_router
-from ai_engine.api.system_router import router as system_router
+from ai_engine.api.v1.chat_router import router as session_router
+from ai_engine.api.v1.system_router import router as system_router
 from ai_engine.chains.chat_chain import chat_chain
-from ai_engine.core.constants import LANG_SERVE_ALLOWED_ENDPOINTS
+from ai_engine.core.constants import LANG_SERVE_ALLOWED_ENDPOINTS, API_V1_STR
 from ai_engine.core.lifespan import app_lifespan
 from ai_engine.core.openapi_config import setup_openapi
 from ai_engine.core.settings import settings
@@ -22,8 +22,8 @@ def create_app() -> FastAPI:
     )
 
     # 2. 挂载自定义 RESTFul 路由
-    fastapi_app.include_router(system_router)
-    fastapi_app.include_router(session_router)
+    fastapi_app.include_router(system_router, prefix=API_V1_STR)
+    fastapi_app.include_router(session_router, prefix=API_V1_STR)
 
     if settings.ENABLE_LANGSERVE_EXTRAS:
         allowed_endpoints = None
@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
     add_routes(
         fastapi_app,
         chat_chain,
-        path="/chat",
+        path=f"{API_V1_STR}/chat",
         enable_feedback_endpoint=enable_feedback,
         enable_public_trace_link_endpoint=enable_trace,
         enabled_endpoints=allowed_endpoints,
