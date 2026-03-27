@@ -1,6 +1,7 @@
 # src/ai_engine/chains/nodes/rag_node.py
 import asyncio
 from typing import Dict, Any, AsyncIterator
+
 from langchain_core.messages import BaseMessage, AIMessageChunk
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -27,16 +28,32 @@ async def dynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMessa
 
     retriever = vdb_manager.store.as_retriever(search_kwargs={"k": search_k})
     initial_docs = await asyncio.to_thread(retriever.invoke, user_input)
+    logger.info(f"向量库初筛完成，抓取到原始文档: {len(initial_docs)} 篇")
 
     final_docs = await asyncio.to_thread(get_reranked_docs, user_input, initial_docs)
     logger.info(f"重排阶段完成，剩余精选文档: {len(final_docs)}")
     context, sources = format_docs_with_sources(final_docs)
 
+    if not context.strip():
+        logger.warning(f"检索结果为空，触发 RAG 强制静默，已阻断大模型调用。")
+        yield AIMessageChunk(**{"content": "抱歉，知识库中未能检索到与您问题相关的信息。请尝试换个说法。"})
+
+        # 给出最终的元数据标记，结束本次流
+        yield AIMessageChunk(**{
+            "content": "",
+            "additional_kwargs": {
+                "sources": [],
+                "biz_type": biz_type,
+                "has_context": False
+            }
+        })
+        return
+
     if final_docs:
         new_biz_type = final_docs[0].metadata.get("biz_type", biz_type)
         if new_biz_type != biz_type:
             biz_type = new_biz_type
-            logger.info(f"💡 根据检索结果，动态切换 Prompt 模板至: [{biz_type}]")
+            logger.info(f"根据检索结果，动态切换 Prompt 模板至: [{biz_type}]")
             prompt_data = get_prompt_config(biz_type)
 
     llm = LLMFactory.get_model(

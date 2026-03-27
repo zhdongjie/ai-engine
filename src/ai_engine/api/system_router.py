@@ -1,8 +1,10 @@
 # src/ai_engine/api/system_router.py
 from fastapi import APIRouter
+
 from ai_engine.core.settings import settings
 
 router = APIRouter(tags=["System Management"])
+
 
 @router.get("/health")
 async def health_check():
