@@ -1,6 +1,6 @@
 # src/ai_engine/schemas/chat_schemas.py
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import Field
 
@@ -10,6 +10,15 @@ from ai_engine.schemas.base import BaseSchema
 class ChatInput(BaseSchema):
     input: str = Field(..., description="用户的纯文本提问")
     biz_type: str = Field(default="normal_chat", description="业务类型标识符")
+
+
+class ChatOutput(BaseSchema):
+    """
+    全系统统一的结构化输出模型
+    """
+    answer: str = Field(..., description="AI 生成的核心回答内容")
+    sources: List[str] = Field(default_factory=list, description="参考来源文档列表")
+    intent: str = Field(default="NORMAL", description="意图识别结果")
 
 
 class SessionItem(BaseSchema):

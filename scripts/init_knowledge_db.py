@@ -15,6 +15,7 @@ from sqlalchemy import text
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
 from ai_engine.infra.db.pgsql import db_manager
+from scripts.processors.factory import get_processor
 
 
 def load_documents() -> List:
@@ -46,11 +47,16 @@ def load_documents() -> List:
 
         biz_type = biz_dir.name
         logger.info(f"正在解析业务模块: [{biz_type}]")
+        processor = get_processor(biz_type)
 
         # --- Markdown ---
         for md_path in biz_dir.glob("**/*.md"):
             try:
                 content = md_path.read_text(encoding="utf-8")
+
+                extracted_meta = {}
+                if processor:
+                    content, extracted_meta = processor.process(content, md_path)
 
                 md_splits = md_splitter.split_text(content)
                 final_splits = text_splitter.split_documents(md_splits)
@@ -61,6 +67,7 @@ def load_documents() -> List:
                         "file_name": md_path.name,
                         "source_type": "markdown"
                     })
+                    doc.metadata.update(extracted_meta)
                     all_docs.append(doc)
 
             except Exception as e:
@@ -137,6 +144,7 @@ def init_chroma(embeddings, docs):
 
     logger.info(f"写入 {len(docs)} 条数据到 Chroma...")
     vector_store.add_documents(docs)
+
 
 
 def run_init():

@@ -4,7 +4,9 @@ from typing import Dict, Any, AsyncIterator
 
 from langchain_core.messages import BaseMessage, AIMessageChunk
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnableConfig
 
+from ai_engine.chains.rag_plugins import get_rag_plugins
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
 from ai_engine.core.settings import settings
@@ -13,11 +15,15 @@ from ai_engine.infra.llm.llm_factory import LLMFactory
 from ai_engine.utils.retrieval_utils import get_reranked_docs, format_docs_with_sources
 
 
-async def dynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMessage]:
+async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) -> AsyncIterator[BaseMessage]:
     """异步版本：原子化执行 RAG 检索生成"""
     biz_type = input_data.get("biz_type", "normal_chat")
     user_input = input_data.get("input", "")
     history = input_data.get("history", [])
+
+    configurable = config.get("configurable") or {}
+
+    user_lang = configurable.get("lang", "zh")
 
     prompt_data = get_prompt_config(biz_type)
 
@@ -26,19 +32,27 @@ async def dynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMessa
 
     logger.debug(f"进入 RAG 模式，开始检索知识库 (召回数量 k={search_k})...")
 
-    retriever = vdb_manager.store.as_retriever(search_kwargs={"k": search_k})
+    search_kwargs = {
+        "k": search_k,
+        "filter": {"lang": user_lang}
+    }
+    retriever = vdb_manager.store.as_retriever(search_kwargs=search_kwargs)
     initial_docs = await asyncio.to_thread(retriever.invoke, user_input)
-    logger.info(f"向量库初筛完成，抓取到原始文档: {len(initial_docs)} 篇")
+    logger.info(f"向量库初筛完成，抓取到对应语言原始文档: {len(initial_docs)} 篇")
 
     final_docs = await asyncio.to_thread(get_reranked_docs, user_input, initial_docs)
     logger.info(f"重排阶段完成，剩余精选文档: {len(final_docs)}")
     context, sources = format_docs_with_sources(final_docs)
+    extra_data = {}
+    plugins = get_rag_plugins(biz_type)
+
+    for plugin in plugins:
+        context, extra_data = plugin.process(final_docs, context, extra_data)
 
     if not context.strip():
-        logger.warning(f"检索结果为空，触发 RAG 强制静默，已阻断大模型调用。")
+        logger.warning("检索结果为空，触发 RAG 强制静默，已阻断大模型调用。")
         yield AIMessageChunk(**{"content": "抱歉，知识库中未能检索到与您问题相关的信息。请尝试换个说法。"})
 
-        # 给出最终的元数据标记，结束本次流
         yield AIMessageChunk(**{
             "content": "",
             "additional_kwargs": {
@@ -71,19 +85,17 @@ async def dynamic_rag_run(input_data: Dict[str, Any]) -> AsyncIterator[BaseMessa
     async for chunk in (prompt_template | llm).astream({
         "input": user_input,
         "history": history,
-        "context": context
+        "context": context,
+        **extra_data
     }):
         yield chunk
-
-    if context.strip() and sources:
-        source_text = "\n\n> **参考来源**：" + "，".join(f"`{s}`" for s in sources)
-        yield AIMessageChunk(**{"content": source_text})
 
     yield AIMessageChunk(**{
         "content": "",
         "additional_kwargs": {
             "sources": sources,
             "biz_type": biz_type,
-            "has_context": bool(context)
+            "has_context": bool(context),
+            **extra_data
         }
     })
