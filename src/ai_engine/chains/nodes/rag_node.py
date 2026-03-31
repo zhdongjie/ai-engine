@@ -81,6 +81,7 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
             context=context,
             extra_data=extra_data,
             sources=sources,
-            config=config
+            config=config,
+            intent="RAG"
     ):
         yield chunk

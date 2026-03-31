@@ -33,6 +33,7 @@ async def normal_chat_run(input_data: Dict[str, Any], config: RunnableConfig) ->
             context=context,
             extra_data=extra_data,
             sources=[],
-            config=config
+            config=config,
+            intent="NORMAL"
     ):
         yield chunk

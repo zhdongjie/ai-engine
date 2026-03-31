@@ -57,6 +57,7 @@ class ChatSession(
         description="长会话的记忆摘要（当 Context Window 不足时，由 LLM 自动生成的历史摘要）"
     )
     is_pinned: bool = Field(default=False, description="用户是否将该对话置顶")
+    lang: str = Field(default="zh", description="用户语言状态")
 
     # 关联消息
     messages: List["ChatMessage"] = Relationship(

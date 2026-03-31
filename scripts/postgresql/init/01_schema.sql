@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     system_prompt  TEXT,                                                     -- 该会话固定的系统提示词
     summary        TEXT,                                                     -- 会话自动生成的摘要
     is_pinned      BOOLEAN DEFAULT FALSE NOT NULL                            -- 是否置顶
+    lang           VARCHAR(10) DEFAULT 'ch'                                  -- 用户语言状态
 );
 
 -- 会话表索引优化
