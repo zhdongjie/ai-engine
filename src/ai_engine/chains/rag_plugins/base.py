@@ -2,17 +2,25 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Tuple, Any
 
+from langchain_core.runnables import RunnableConfig
+
 
 class BaseRAGPlugin(ABC):
-    """RAG 后处理插件基类"""
+    """RAG 后处理插件基类：支持对检索结果、上下文及额外数据的二次加工"""
 
     @abstractmethod
-    def process(self, docs: List[Any], context: str, extra: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    def process(
+            self,
+            docs: List[Any],
+            context: str,
+            extra: Dict[str, Any],
+            config: RunnableConfig
+    ) -> Tuple[str, Dict[str, Any]]:
         """
-        处理检索结果
-        :param docs: 检索召回的 Document 列表
-        :param context: 已经拼接好的上下文纯文本
-        :param extra: 需要传递给大模型或前端的额外结构化数据
-        :return: (处理后的 context, 处理后的 extra)
+        :param docs: 检索召回的 Document 列表（包含 metadata）
+        :param context: 已初步拼接的上下文文本
+        :param extra: 传递给 LLM 或前端的额外数据（如 sources, scores）
+        :param config: 执行配置（包含 configurable.lang, metadata 等）
+        :return: (加工后的 context, 加工后的 extra)
         """
         pass

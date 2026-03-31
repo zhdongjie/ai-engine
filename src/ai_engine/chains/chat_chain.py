@@ -2,9 +2,12 @@
 import uuid
 
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.runnables import RunnableLambda, ConfigurableFieldSpec, RunnablePassthrough, Runnable
+from langchain_core.runnables import RunnableLambda, ConfigurableFieldSpec, RunnablePassthrough, Runnable, \
+    RunnableGenerator
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
+from ai_engine.chains.formatters.response_stream import response_stream_formatter
+from ai_engine.chains.interceptors.i18n_interceptor import i18n_input_interceptor
 from ai_engine.chains.nodes.router_node import intent_router, route_logger, route_logic
 from ai_engine.core.logger import logger
 from ai_engine.infra.llm.message_adapter import PostgresCustomChatMessageHistory
@@ -12,9 +15,11 @@ from ai_engine.schemas.chat_schemas import ChatInput
 
 # 1. 构建主交通骨干网
 master_chain: Runnable = (
-        RunnablePassthrough.assign(intent=intent_router)
+        RunnableLambda(i18n_input_interceptor)
+        | RunnablePassthrough.assign(intent=intent_router)
         | RunnableLambda(route_logger)
         | RunnableLambda(route_logic)
+        | RunnableGenerator(response_stream_formatter)  # type: ignore
 )
 
 

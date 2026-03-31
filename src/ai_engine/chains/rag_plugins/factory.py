@@ -2,13 +2,20 @@
 from typing import List
 
 from .base import BaseRAGPlugin
+from .i18n_plugin import I18nInstructionPlugin
 from .java_docs_plugin import JavaDocsPlugin
 
 _PLUGIN_REGISTRY = {
     "java_tutor": [
+        I18nInstructionPlugin(),
         JavaDocsPlugin(),
     ],
-    "normal_chat": [],
+    "normal_chat": [
+        I18nInstructionPlugin()
+    ],
+    "session_title": [
+        I18nInstructionPlugin()
+    ],
 }
 
 
