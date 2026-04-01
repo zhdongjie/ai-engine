@@ -2,6 +2,7 @@
 from typing import Optional
 
 from .base import BaseProcessor
+from .default_processor import DefaultProcessor
 from .java_docs_processor import JavaDocProcessor
 
 _PROCESSOR_REGISTRY = {
@@ -11,4 +12,4 @@ _PROCESSOR_REGISTRY = {
 
 def get_processor(biz_type: str) -> Optional[BaseProcessor]:
     """根据业务类型获取对应的文档处理器"""
-    return _PROCESSOR_REGISTRY.get(biz_type)
+    return _PROCESSOR_REGISTRY.get(biz_type, DefaultProcessor(enable_lang_detect=True))

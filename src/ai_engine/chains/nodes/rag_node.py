@@ -37,6 +37,10 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
     }
     retriever = vdb_manager.store.as_retriever(search_kwargs=search_kwargs)
     initial_docs = await asyncio.to_thread(retriever.invoke, user_input)
+
+    if not initial_docs:
+        fallback_retriever = vdb_manager.store.as_retriever(search_kwargs={"k": search_k})
+        initial_docs = await asyncio.to_thread(fallback_retriever.invoke, user_input)
     logger.info(f"向量库初筛完成，抓取到对应语言原始文档: {len(initial_docs)} 篇")
 
     final_docs = await asyncio.to_thread(get_reranked_docs, user_input, initial_docs)

@@ -48,7 +48,7 @@ class PostgresCustomChatMessageHistory(BaseChatMessageHistory):
     def __init__(
             self,
             session_id: str,
-            tenant_id: str = "default_tenant",
+            tenant_id: str = "default",
             user_id: str = "anonymous",
     ):
         self.session_id = uuid.UUID(session_id)

@@ -88,6 +88,13 @@ def load_documents() -> List:
             )
 
             raw_docs = txt_loader.load() + pdf_loader.load()
+
+            for doc in raw_docs:
+                source_path = Path(str(doc.metadata.get("source", "")))
+                content, extracted_meta = processor.process(doc.page_content, source_path)
+                doc.page_content = content
+                doc.metadata.update(extracted_meta)
+
             splits = text_splitter.split_documents(raw_docs)
 
             for doc in splits:

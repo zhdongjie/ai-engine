@@ -111,7 +111,7 @@ class ChatRepository:
     def get_user_sessions(
             self,
             user_id: str,
-            tenant_id: str = "default_tenant",
+            tenant_id: str = "default",
             limit: int = 20,
             offset: int = 0
     ) -> List[ChatSession]:

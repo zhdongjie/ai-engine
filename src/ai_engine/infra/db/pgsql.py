@@ -1,4 +1,4 @@
-# src/ai_engine/infra/db/pgsql.py
+﻿# src/ai_engine/infra/db/pgsql.py
 import logging
 from contextlib import contextmanager
 from typing import Generator
@@ -60,6 +60,7 @@ class DatabaseManager:
         with self._session_maker() as session:
             try:
                 yield session
+                session.commit()
             except Exception as e:
                 session.rollback()
                 raise e
