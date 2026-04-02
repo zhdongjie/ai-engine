@@ -16,6 +16,45 @@ All future code changes based on this document should follow these rules:
 3. Apply changes incrementally, with each phase independently reviewable and reversible.
 4. Prefer extending the current retrieval pipeline over replacing it all at once.
 5. Keep feature flags or configuration switches where a rollout may affect answer quality.
+6. Update this plan document whenever a phase is completed or materially re-scoped.
+
+## Progress Tracking
+
+Source of truth:
+- This file is the primary implementation plan and must stay aligned with the codebase.
+
+Current status:
+- Phase 1: Completed
+- Phase 2: Completed
+- Phase 3: Not started
+
+Phase 1 completion summary:
+- Retrieval strategy configuration switches were added.
+- Query transformation was implemented.
+- Lexical retrieval was added with BM25.
+- Semantic and lexical retrieval were fused with RRF.
+- Header-enriched chunk metadata was added during ingestion.
+- Context-enriched retrieval was added with neighbor expansion.
+
+Phase 2 implementation focus:
+- Lightweight retrieval quality assessment
+- Contextual compression before final generation
+- Metadata preparation for later Small-to-Big retrieval
+
+Phase 2 execution checklist:
+- [x] Add retrieval quality assessment and confidence flags
+- [x] Add weak-retrieval fallback behavior
+- [x] Add contextual compression with a prompt-safe context budget
+- [x] Preserve metadata needed for later Small-to-Big retrieval expansion
+- [x] Run static verification and update this plan after completion
+
+Phase 2 completion summary:
+- Retrieval quality checks now evaluate doc count, source count, top score, and score spread.
+- Weak retrieval can retry with a relaxed rerank threshold before final generation.
+- Context assembly now keeps high-signal anchor chunks before neighbor expansion.
+- Final prompt context is compressed with chunk-count and character-budget limits.
+- Expanded chunks now carry retrieval-anchor metadata for later Small-to-Big retrieval work.
+- Shared retrieval strategy settings were aligned into `.env`, while environment-specific runtime settings were kept in `.env.{profile}` files.
 
 ## Current Project Baseline
 
@@ -288,6 +327,9 @@ The recommended upgrade path is:
 
 ### Phase 1: Improve Recall Quality
 
+Status:
+- Completed
+
 Scope:
 - Query Transformation
 - Fusion Retrieval
@@ -303,10 +345,18 @@ Why this phase comes first:
 
 ### Phase 2: Improve Context Quality
 
+Status:
+- Completed
+
 Scope:
-- Small-to-Big Retrieval
 - Contextual Compression
 - Lightweight CRAG
+- Metadata preparation for later Small-to-Big retrieval
+
+Current implementation order:
+1. Lightweight CRAG-style quality checks
+2. Contextual compression
+3. Metadata preparation for later Small-to-Big retrieval
 
 Goal:
 - Provide cleaner and more complete context to the generator
@@ -317,7 +367,11 @@ Why this phase comes second:
 
 ### Phase 3: Improve Ingestion and Post-processing Quality
 
+Status:
+- Not started
+
 Scope:
+- Small-to-Big Retrieval
 - Semantic Chunking
 - Document Augmentation
 - RSE

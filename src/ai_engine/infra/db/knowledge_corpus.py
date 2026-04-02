@@ -1,3 +1,4 @@
+from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Iterable, List, Tuple
 
@@ -89,7 +90,12 @@ class KnowledgeCorpusManager:
                 if unique_key in seen:
                     continue
                 seen.add(unique_key)
-                expanded.append(neighbor)
+                enriched_neighbor = deepcopy(neighbor)
+                enriched_neighbor.metadata["retrieval_anchor_source_key"] = str(source_key)
+                enriched_neighbor.metadata["retrieval_anchor_chunk_index"] = int(chunk_index)
+                enriched_neighbor.metadata["neighbor_distance"] = offset
+                enriched_neighbor.metadata["is_retrieval_anchor"] = offset == 0
+                expanded.append(enriched_neighbor)
 
         expanded.sort(
             key=lambda item: (

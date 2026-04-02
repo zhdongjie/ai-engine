@@ -4,7 +4,7 @@ import os
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ACTIVE_ENV = os.getenv("ENV", "dev").lower()
+ACTIVE_ENV = os.getenv("APP_ENV", os.getenv("ENV", "dev")).lower()
 
 
 def project_root() -> str:
@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     RRF_K: int = Field(default=60, description="RRF smoothing constant")
     ENABLE_CONTEXT_ENRICHMENT: bool = Field(default=True, description="Expand matched chunks with local neighbors")
     CONTEXT_WINDOW_SIZE: int = Field(default=1, description="Neighbor window size for context enrichment")
+    ENABLE_RETRIEVAL_QUALITY_CHECK: bool = Field(default=True, description="Enable retrieval quality checks before generation")
+    MIN_RETRIEVAL_DOCS: int = Field(default=2, description="Minimum number of reranked chunks required for strong confidence")
+    MIN_RETRIEVAL_SOURCES: int = Field(default=1, description="Minimum number of unique sources required for strong confidence")
+    MIN_RERANK_SCORE: float = Field(default=0.2, description="Minimum top rerank score for strong confidence")
+    MIN_RERANK_SCORE_GAP: float = Field(default=0.02, description="Minimum score gap between top and tail chunks for confidence")
+    ENABLE_CONTEXT_COMPRESSION: bool = Field(default=True, description="Enable context compression before final generation")
+    MAX_CONTEXT_CHUNKS: int = Field(default=6, description="Maximum number of chunks kept after context compression")
+    MAX_CONTEXT_CHARACTERS: int = Field(default=6000, description="Maximum number of context characters sent to the final prompt")
 
     # ===============================
     # 数据库配置

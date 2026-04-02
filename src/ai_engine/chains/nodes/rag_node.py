@@ -13,10 +13,13 @@ from ai_engine.core.settings import settings
 from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
 from ai_engine.infra.db.vdb import vdb_manager
 from ai_engine.utils.retrieval_utils import (
+    assess_retrieval_quality,
+    compress_context_documents,
     dedupe_documents,
     format_docs_with_sources,
     get_reranked_docs,
     reciprocal_rank_fusion,
+    select_top_documents,
 )
 
 
@@ -64,6 +67,22 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
         "context_window_size",
         settings.CONTEXT_WINDOW_SIZE,
     )
+    enable_retrieval_quality_check = retrieval_config.get(
+        "enable_retrieval_quality_check",
+        settings.ENABLE_RETRIEVAL_QUALITY_CHECK,
+    )
+    enable_context_compression = retrieval_config.get(
+        "enable_context_compression",
+        settings.ENABLE_CONTEXT_COMPRESSION,
+    )
+    max_context_chunks = retrieval_config.get(
+        "max_context_chunks",
+        settings.MAX_CONTEXT_CHUNKS,
+    )
+    max_context_characters = retrieval_config.get(
+        "max_context_characters",
+        settings.MAX_CONTEXT_CHARACTERS,
+    )
 
     queries = [user_input]
     if enable_query_transform:
@@ -93,13 +112,72 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
 
     final_docs = await asyncio.to_thread(get_reranked_docs, user_input, candidate_docs)
     logger.info(f"RAG rerank completed with {len(final_docs)} chunks")
+    retrieval_quality = {
+        "doc_count": len(final_docs),
+        "source_count": 0,
+        "top_score": 0.0,
+        "tail_score": 0.0,
+        "score_gap": 0.0,
+        "weak_reasons": [],
+        "is_confident": bool(final_docs),
+        "should_retry": False,
+    }
+    relaxed_retrieval_used = False
 
-    if enable_context_enrichment and final_docs:
-        final_docs = knowledge_corpus.expand_with_neighbors(final_docs, context_window_size)
+    if enable_retrieval_quality_check:
+        retrieval_quality = assess_retrieval_quality(final_docs)
+        if retrieval_quality["should_retry"] and candidate_docs:
+            relaxed_docs = await asyncio.to_thread(
+                get_reranked_docs,
+                user_input,
+                candidate_docs,
+                0.0,
+                max_context_chunks,
+            )
+            relaxed_quality = assess_retrieval_quality(relaxed_docs)
+
+            improved_doc_count = relaxed_quality["doc_count"] > retrieval_quality["doc_count"]
+            improved_top_score = relaxed_quality["top_score"] > retrieval_quality["top_score"]
+            if improved_doc_count or improved_top_score:
+                final_docs = relaxed_docs
+                retrieval_quality = relaxed_quality
+                relaxed_retrieval_used = True
+                logger.info(f"Relaxed retrieval fallback applied with {len(final_docs)} chunks")
+
+        if retrieval_quality["weak_reasons"]:
+            logger.warning(
+                f"RAG retrieval quality is weak: reasons={retrieval_quality['weak_reasons']}, "
+                f"doc_count={retrieval_quality['doc_count']}, "
+                f"source_count={retrieval_quality['source_count']}, "
+                f"top_score={retrieval_quality['top_score']:.4f}"
+            )
+
+    anchor_docs = final_docs
+    if enable_context_compression and anchor_docs:
+        anchor_docs = select_top_documents(anchor_docs, max_context_chunks)
+        logger.info(f"Context anchor selection kept {len(anchor_docs)} chunks")
+
+    if enable_context_enrichment and anchor_docs:
+        final_docs = knowledge_corpus.expand_with_neighbors(anchor_docs, context_window_size)
         logger.info(f"Context enrichment expanded retrieval to {len(final_docs)} chunks")
+    else:
+        final_docs = anchor_docs
+
+    if enable_context_compression and final_docs:
+        final_docs = compress_context_documents(
+            final_docs,
+            max_chunks=max_context_chunks,
+            max_characters=max_context_characters,
+        )
+        logger.info(f"Context compression kept {len(final_docs)} chunks")
 
     context, sources = format_docs_with_sources(final_docs)
-    extra_data = {"retrieval_queries": queries}
+    extra_data = {
+        "retrieval_queries": queries,
+        "retrieval_quality": retrieval_quality,
+        "retrieval_confident": retrieval_quality.get("is_confident", bool(final_docs)),
+        "relaxed_retrieval_used": relaxed_retrieval_used,
+    }
 
     plugins = get_rag_plugins(biz_type)
     for plugin in plugins:
