@@ -61,6 +61,13 @@ class Settings(BaseSettings):
     RERANK_THRESHOLD: float = Field(default=0.1, description="重排分数过滤阈值，低于此分数视为无关")
     RERANK_TOP_N: int = Field(default=3, description="重排后最终喂给大模型的精华片段数")
     VECTOR_SEARCH_TOP_K: int = Field(default=10, description="向量检索初筛抓取的片段数 (应大于 TOP_N)")
+    ENABLE_QUERY_TRANSFORM: bool = Field(default=True, description="Enable query rewriting before retrieval")
+    QUERY_TRANSFORM_MAX_QUERIES: int = Field(default=3, description="Maximum number of transformed queries")
+    ENABLE_LEXICAL_RETRIEVAL: bool = Field(default=True, description="Enable BM25 retrieval")
+    LEXICAL_SEARCH_TOP_K: int = Field(default=8, description="Top K for lexical retrieval")
+    RRF_K: int = Field(default=60, description="RRF smoothing constant")
+    ENABLE_CONTEXT_ENRICHMENT: bool = Field(default=True, description="Expand matched chunks with local neighbors")
+    CONTEXT_WINDOW_SIZE: int = Field(default=1, description="Neighbor window size for context enrichment")
 
     # ===============================
     # 数据库配置

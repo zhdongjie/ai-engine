@@ -18,6 +18,37 @@ from ai_engine.infra.db.pgsql import db_manager
 from scripts.processors.factory import get_processor
 
 
+def _build_header_path(metadata: dict) -> str:
+    headers = [
+        metadata.get("Header 1", "").strip(),
+        metadata.get("Header 2", "").strip(),
+        metadata.get("Header 3", "").strip(),
+    ]
+    return " > ".join(header for header in headers if header)
+
+
+def _enrich_chunk_metadata(docs: List, biz_type: str, file_name: str, source_type: str) -> None:
+    source_key = f"{biz_type}:{file_name}"
+    total_chunks = len(docs)
+
+    for index, doc in enumerate(docs):
+        header_path = _build_header_path(doc.metadata)
+        doc.metadata.update(
+            {
+                "biz_type": biz_type,
+                "file_name": file_name,
+                "source_type": source_type,
+                "source_key": source_key,
+                "chunk_index": index,
+                "chunk_total": total_chunks,
+                "header_path": header_path,
+            }
+        )
+
+        if header_path:
+            doc.page_content = f"[Section] {header_path}\n{doc.page_content}"
+
+
 def load_documents() -> List:
     """加载并切分所有文档"""
     headers_to_split_on = [
@@ -60,13 +91,14 @@ def load_documents() -> List:
 
                 md_splits = md_splitter.split_text(content)
                 final_splits = text_splitter.split_documents(md_splits)
+                _enrich_chunk_metadata(
+                    final_splits,
+                    biz_type=biz_type,
+                    file_name=md_path.name,
+                    source_type="markdown",
+                )
 
                 for doc in final_splits:
-                    doc.metadata.update({
-                        "biz_type": biz_type,
-                        "file_name": md_path.name,
-                        "source_type": "markdown"
-                    })
                     doc.metadata.update(extracted_meta)
                     all_docs.append(doc)
 
@@ -96,14 +128,17 @@ def load_documents() -> List:
                 doc.metadata.update(extracted_meta)
 
             splits = text_splitter.split_documents(raw_docs)
+            _enrich_chunk_metadata(
+                splits,
+                biz_type=biz_type,
+                file_name=os.path.basename(str(biz_dir)),
+                source_type="file",
+            )
 
             for doc in splits:
                 if doc.page_content.strip():
-                    doc.metadata.update({
-                        "biz_type": biz_type,
-                        "file_name": os.path.basename(doc.metadata.get("source", "unknown")),
-                        "source_type": "file"
-                    })
+                    doc.metadata["file_name"] = os.path.basename(doc.metadata.get("source", "unknown"))
+                    doc.metadata["source_key"] = f"{biz_type}:{doc.metadata['file_name']}"
                     all_docs.append(doc)
 
         except Exception as e:

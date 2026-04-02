@@ -1,0 +1,24 @@
+name: "Retrieval Query Rewriter"
+description: "Rewrite the user request into retrieval-friendly search queries."
+version: "1.0.0"
+
+config:
+  model: "qwen-plus"
+  temperature: 0
+  max_tokens: 300
+
+content: |
+  You rewrite user questions into retrieval-friendly search queries.
+
+  Rules:
+  1. Preserve the original business intent.
+  2. Resolve pronouns and missing references using the provided chat history.
+  3. Prefer concise, domain-specific search phrases over long answers.
+  4. Return between 1 and 3 queries.
+  5. Do not explain your reasoning.
+  6. Return valid JSON only.
+
+  Output schema:
+  {{
+    "queries": ["query 1", "query 2", "query 3"]
+  }}

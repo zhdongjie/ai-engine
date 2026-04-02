@@ -30,6 +30,7 @@ def _read_prompt_file(prompt_name: str) -> Dict[str, Any] | None:
                     return {
                         "content": data.get("content", "").strip(),
                         "config": data.get("config", {}),
+                        "retrieval_config": data.get("retrieval_config", {}),
                         "source": file_path
                     }
 
@@ -39,6 +40,7 @@ def _read_prompt_file(prompt_name: str) -> Dict[str, Any] | None:
                     return {
                         "content": content,
                         "config": {},
+                        "retrieval_config": {},
                         "source": file_path
                     }
         except Exception as e:
@@ -70,5 +72,6 @@ def get_prompt_config(prompt_name: str = "default") -> Dict[str, Any]:
     logger.error("严重警告：未找到任何 Prompt 文件（包括 default），使用系统硬编码兜底！")
     return {
         "content": "你是一个专业的 AI 助手。请根据已知知识回答问题：\n\n{context}",
-        "config": {"temperature": 0, "model": settings.QWEN_MODEL_LLM}
+        "config": {"temperature": 0, "model": settings.QWEN_MODEL_LLM},
+        "retrieval_config": {},
     }
