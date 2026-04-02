@@ -26,7 +26,8 @@ Source of truth:
 Current status:
 - Phase 1: Completed
 - Phase 2: Completed
-- Phase 3: Not started
+- Phase 3: Completed
+- Phase 4: Completed
 
 Phase 1 completion summary:
 - Retrieval strategy configuration switches were added.
@@ -55,6 +56,26 @@ Phase 2 completion summary:
 - Final prompt context is compressed with chunk-count and character-budget limits.
 - Expanded chunks now carry retrieval-anchor metadata for later Small-to-Big retrieval work.
 - Shared retrieval strategy settings were aligned into `.env`, while environment-specific runtime settings were kept in `.env.{profile}` files.
+
+Phase 3 progress summary:
+- Small-to-Big retrieval is now in place using section-path metadata with parent-window fallback.
+- Parent-context expansion is controlled by dedicated retrieval settings.
+- The RAG pipeline now prefers parent context expansion before falling back to neighbor-only expansion.
+- Semantic-aware chunking is now available during ingestion with a fallback path to fixed-size chunking.
+- TXT and PDF ingestion now groups chunks by source file before metadata numbering is assigned.
+- Optional document augmentation now appends deterministic QA-style retrieval hints during ingestion.
+- Document augmentation is controlled by shared ingestion settings and is disabled by default.
+- RSE-style segment extraction now filters expanded context by similarity, anchor distance, and aggregated segment score.
+- Phase 3 retrieval and ingestion upgrades are now complete and configurable through shared settings.
+
+Phase 4 progress summary:
+- A lightweight offline retrieval evaluator is now available for JSONL-based replay.
+- Retrieval diagnostics are exposed as structured records for report generation and failed-case review.
+- Baseline reports can now be grouped by business type and language for targeted tuning.
+- Failed retrieval cases can now be exported directly for dataset expansion and regression tracking.
+- New reports can now be compared against a saved baseline report to measure threshold and prompt changes.
+- Online RAG execution and offline evaluation now share retrieval runtime config resolution and candidate retrieval assembly helpers.
+- Shared knowledge loading and initialization logic now lives under `src/ai_engine/knowledge`, while `scripts/` only keeps CLI entrypoints.
 
 ## Current Project Baseline
 
@@ -368,7 +389,7 @@ Why this phase comes second:
 ### Phase 3: Improve Ingestion and Post-processing Quality
 
 Status:
-- Not started
+- Completed
 
 Scope:
 - Small-to-Big Retrieval
@@ -376,12 +397,59 @@ Scope:
 - Document Augmentation
 - RSE
 
+Current implementation order:
+1. Small-to-Big retrieval using existing section and chunk metadata
+   Status: Completed
+2. Semantic chunking evaluation
+   Status: Completed
+3. Optional document augmentation
+   Status: Completed
+4. Advanced segment extraction and pruning
+   Status: Completed
+
 Goal:
 - Improve chunk quality and offline retrieval assets
 
 Why this phase comes later:
 - These are more expensive to implement and evaluate
 - They are best added after the main online retrieval loop is stable
+
+### Phase 4: Evaluate and Operationalize Retrieval Quality
+
+Status:
+- Completed
+
+Scope:
+- Offline retrieval evaluation
+- Retrieval diagnostics export
+- Baseline metrics for future prompt and threshold tuning
+
+Current implementation order:
+1. Lightweight offline retrieval evaluator
+   Status: Completed
+2. Structured retrieval diagnostics for evaluator consumption
+   Status: Completed
+3. Dataset expansion and baseline measurement workflow
+   Status: Completed
+
+Goal:
+- Turn the upgraded retrieval stack into something measurable and tunable
+
+Why this phase comes next:
+- The current retrieval stack is now feature-rich enough that quality regressions are harder to judge manually
+- Future tuning needs a repeatable measurement workflow
+
+Operational workflow:
+- Maintain JSONL datasets under `resource/evals/` with stable `case_id`, `biz_type`, `lang`, and expected retrieval targets.
+- Run `python scripts/evaluate_retrieval.py --dataset resource/evals/retrieval_eval.example.jsonl --output resource/evals/retrieval_report.json`.
+- Export failed cases with `--failures-output resource/evals/retrieval_failures.json` so new regression cases can be reviewed and expanded.
+- Compare a new run against a saved baseline with `--compare resource/evals/retrieval_report_baseline.json`.
+- Use the grouped report sections (`by_biz_type` and `by_lang`) before changing thresholds globally.
+
+Why this workflow matters:
+- Retrieval tuning should be based on repeatable measurements rather than ad-hoc manual checks.
+- Grouped metrics make it easier to identify business-specific regressions that are hidden in global averages.
+- Failed-case exports shorten the loop between online issues, offline datasets, and future regression checks.
 
 ## Detailed Step-by-Step Plan
 
@@ -602,6 +670,7 @@ Recommendation:
 - Keep orchestration here
 - Move reusable retrieval logic into helper modules
 - Do not let this file become a monolith
+- Shared runtime helpers should be reused by both online RAG execution and offline evaluation to avoid behavior drift
 
 ### Retrieval Utilities
 
@@ -618,6 +687,7 @@ Expected responsibility after upgrade:
 Recommendation:
 - Expand this module first
 - Split later only if it becomes too large
+- Shared retrieval runtime helpers should live here before any later module split
 
 ### Ingestion Pipeline
 
@@ -634,6 +704,7 @@ Expected responsibility after upgrade:
 Recommendation:
 - Keep ingestion centralized here
 - Move document-specific rules into processors
+- Shared ingestion logic should live in package modules, with scripts acting only as thin entrypoints
 
 ### Processor Layer
 
