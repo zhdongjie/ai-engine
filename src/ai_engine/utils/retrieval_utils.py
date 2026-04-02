@@ -1,3 +1,4 @@
+# src/ai_engine/utils/retrieval_utils.py
 import asyncio
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Tuple
@@ -5,18 +6,9 @@ from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Tuple
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
 from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
-from ai_engine.infra.llm.llm_factory import LLMFactory
 from ai_engine.infra.db.vdb import vdb_manager
-
-
-def get_doc_key(doc) -> str:
-    metadata = getattr(doc, "metadata", {}) or {}
-    source_key = metadata.get("source_key")
-    chunk_index = metadata.get("chunk_index")
-    if source_key is not None and chunk_index is not None:
-        return f"{source_key}:{chunk_index}"
-    file_name = metadata.get("file_name", "unknown")
-    return f"{file_name}:{hash(doc.page_content)}"
+from ai_engine.infra.llm.llm_factory import LLMFactory
+from ai_engine.utils.doc_utils import get_doc_key
 
 
 def get_source_key(doc) -> str:
@@ -396,7 +388,7 @@ def extract_relevant_segments(
             distance = _get_anchor_distance(doc)
             if score < similarity_floor and not doc.metadata.get("is_retrieval_anchor", False):
                 continue
-            if distance_limit is not None and distance_limit >= 0 and distance > distance_limit:
+            if distance_limit is not None and 0 <= distance_limit < distance:
                 continue
 
             distance_penalty = max(0.0, 1.0 - (distance * 0.15))

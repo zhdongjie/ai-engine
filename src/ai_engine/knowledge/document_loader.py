@@ -196,7 +196,7 @@ def _extract_lead_sentence(text: str, max_length: int) -> str:
     if not normalized:
         return ""
 
-    normalized = re.sub(r"^\[Section\]\s+[^\n]+\s*", "", normalized).strip()
+    normalized = re.sub(r"^\[Section]\s+[^\n]+\s*", "", normalized).strip()
     sentences = [
         sentence.strip()
         for sentence in re.split(r"(?<=[\u3002\uff01\uff1f.!?])\s+", normalized)
@@ -317,7 +317,7 @@ def load_documents() -> List[Document]:
             pdf_loader = DirectoryLoader(
                 str(biz_dir),
                 glob="**/*.pdf",
-                loader_cls=PyPDFLoader,
+                loader_cls=PyPDFLoader,  # type: ignore
             )
 
             raw_docs = txt_loader.load() + pdf_loader.load()

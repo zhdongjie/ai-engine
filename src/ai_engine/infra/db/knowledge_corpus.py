@@ -1,36 +1,28 @@
+# src/ai_engine/infra/db/knowledge_corpus.py
 from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Iterable, List, Tuple
 
 from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
 
 from ai_engine.core.logger import logger
 from ai_engine.knowledge.document_loader import load_documents
-
+from ai_engine.utils.doc_utils import get_doc_key
 
 CorpusKey = Tuple[str, int]
-
-
-def _doc_key(doc) -> str:
-    metadata = getattr(doc, "metadata", {}) or {}
-    source_key = metadata.get("source_key")
-    chunk_index = metadata.get("chunk_index")
-    if source_key is not None and chunk_index is not None:
-        return f"{source_key}:{chunk_index}"
-    file_name = metadata.get("file_name", "unknown")
-    return f"{file_name}:{hash(doc.page_content)}"
 
 
 class KnowledgeCorpusManager:
     def __init__(self):
         self._documents = None
         self._bm25 = None
-        self._doc_map: Dict[CorpusKey, object] = {}
-        self._source_chunks: Dict[str, List[object]] = defaultdict(list)
-        self._section_chunks: Dict[Tuple[str, str], List[object]] = defaultdict(list)
+        self._doc_map: Dict[CorpusKey, Document] = {}
+        self._source_chunks: Dict[str, List[Document]] = defaultdict(list)
+        self._section_chunks: Dict[Tuple[str, str], List[Document]] = defaultdict(list)
 
     @staticmethod
-    def _clone_with_retrieval_metadata(doc: object, **extra_metadata) -> object:
+    def _clone_with_retrieval_metadata(doc: Document, **extra_metadata) -> Document:
         cloned_doc = deepcopy(doc)
         cloned_doc.metadata.update(extra_metadata)
         return cloned_doc
@@ -45,7 +37,7 @@ class KnowledgeCorpusManager:
         return [" > ".join(parts[:index]) for index in range(len(parts), 0, -1)]
 
     @staticmethod
-    def _select_centered_window(docs: List[object], anchor_chunk_index: int, limit: int) -> List[object]:
+    def _select_centered_window(docs: List[Document], anchor_chunk_index: int, limit: int) -> List[Document]:
         if limit <= 0 or len(docs) <= limit:
             return list(docs)
 
@@ -95,7 +87,7 @@ class KnowledgeCorpusManager:
 
         logger.info(f"Knowledge corpus loaded for lexical retrieval: {len(documents)} chunks")
 
-    def keyword_search(self, query: str, top_k: int) -> List[object]:
+    def keyword_search(self, query: str, top_k: int) -> List[Document]:
         self._ensure_loaded()
         if self._bm25 is None:
             return []
@@ -103,12 +95,12 @@ class KnowledgeCorpusManager:
         self._bm25.k = top_k
         return list(self._bm25.invoke(query))
 
-    def expand_with_neighbors(self, docs: Iterable[object], window_size: int) -> List[object]:
+    def expand_with_neighbors(self, docs: Iterable[Document], window_size: int) -> List[Document]:
         self._ensure_loaded()
         if window_size <= 0:
             return list(docs)
 
-        expanded: List[object] = []
+        expanded: List[Document] = []
         seen = set()
 
         for doc in docs:
@@ -117,7 +109,7 @@ class KnowledgeCorpusManager:
             chunk_index = metadata.get("chunk_index")
 
             if source_key is None or chunk_index is None:
-                key = _doc_key(doc)
+                key = get_doc_key(doc)
                 if key not in seen:
                     seen.add(key)
                     expanded.append(doc)
@@ -128,7 +120,7 @@ class KnowledgeCorpusManager:
                 neighbor = self._doc_map.get(neighbor_key)
                 if neighbor is None:
                     continue
-                unique_key = _doc_key(neighbor)
+                unique_key = get_doc_key(neighbor)
                 if unique_key in seen:
                     continue
                 seen.add(unique_key)
@@ -151,13 +143,13 @@ class KnowledgeCorpusManager:
 
     def expand_to_parent_context(
             self,
-            docs: Iterable[object],
+            docs: Iterable[Document],
             max_parent_chunks: int,
             fallback_window_size: int,
-    ) -> List[object]:
+    ) -> List[Document]:
         self._ensure_loaded()
 
-        expanded: List[object] = []
+        expanded: List[Document] = []
         seen = set()
 
         for doc in docs:
@@ -167,14 +159,14 @@ class KnowledgeCorpusManager:
             header_path = str(metadata.get("header_path", "")).strip()
 
             if source_key is None or chunk_index is None:
-                unique_key = _doc_key(doc)
+                unique_key = get_doc_key(doc)
                 if unique_key in seen:
                     continue
                 seen.add(unique_key)
                 expanded.append(doc)
                 continue
 
-            parent_docs: List[object] = []
+            parent_docs: List[Document] = []
             parent_header = ""
             for candidate_header in self._iter_header_candidates(header_path):
                 candidate_docs = self._section_chunks.get((str(source_key), candidate_header), [])
@@ -196,7 +188,7 @@ class KnowledgeCorpusManager:
                     resolution = "window"
 
             if not parent_docs:
-                unique_key = _doc_key(doc)
+                unique_key = get_doc_key(doc)
                 if unique_key in seen:
                     continue
                 seen.add(unique_key)
@@ -204,7 +196,7 @@ class KnowledgeCorpusManager:
                 continue
 
             for parent_doc in parent_docs:
-                unique_key = _doc_key(parent_doc)
+                unique_key = get_doc_key(parent_doc)
                 if unique_key in seen:
                     continue
                 seen.add(unique_key)

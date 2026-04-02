@@ -1,3 +1,4 @@
+# scripts/evaluate_retrieval.py
 import argparse
 import asyncio
 import copy
@@ -100,7 +101,7 @@ async def _run_case(case: Dict[str, Any], diagnostics_limit: int) -> Dict[str, A
 
     queries = [case["query"]]
     if runtime_config["enable_query_transform"]:
-        queries = transform_queries(user_input=case["query"], history=case.get("history", []), config={})
+        queries = transform_queries(user_input=case["query"], history=case.get("history", []), config=None)
 
     candidate_docs = await collect_candidate_documents(
         queries=queries,

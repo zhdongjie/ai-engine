@@ -1,3 +1,4 @@
+# src/ai_engine/chains/nodes/rag_node.py
 import asyncio
 from typing import Any, AsyncIterator, Dict
 
@@ -154,17 +155,17 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
 
     if not context.strip():
         logger.warning("RAG context is empty after retrieval and enrichment")
-        yield AIMessageChunk(
-            content="Sorry, no relevant reference content was found in the current knowledge base."
-        )
-        yield AIMessageChunk(
-            content="",
-            additional_kwargs={
+        yield AIMessageChunk(**{
+            "content": "Sorry, no relevant reference content was found in the current knowledge base."
+        })
+        yield AIMessageChunk(**{
+            "content": "",
+            "additional_kwargs": {
                 "sources": [],
                 "biz_type": biz_type,
                 "has_context": False,
-            },
-        )
+            }
+        })
         return
 
     if final_docs:
