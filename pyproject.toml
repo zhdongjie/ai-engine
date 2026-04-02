@@ -27,9 +27,15 @@ dependencies = [
     "sqlmodel (>=0.0.37,<0.0.38)",
     "asyncpg (>=0.31.0,<0.32.0)",
     "langchain-postgres (>=0.0.17,<0.0.18)",
-    "psycopg[binary,pool] (>=3.3.3,<4.0.0)"
+    "psycopg[binary,pool] (>=3.3.3,<4.0.0)",
+    "rank-bm25 (>=0.2.2,<0.3.0)"
 ]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
+priority = "primary"

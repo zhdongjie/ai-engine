@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     model_name     VARCHAR(100),                                             -- 调用的具体模型名
     system_prompt  TEXT,                                                     -- 该会话固定的系统提示词
     summary        TEXT,                                                     -- 会话自动生成的摘要
-    is_pinned      BOOLEAN DEFAULT FALSE NOT NULL                            -- 是否置顶
+    is_pinned      BOOLEAN DEFAULT FALSE NOT NULL,                           -- 是否置顶
     lang           VARCHAR(10) DEFAULT 'ch'                                  -- 用户语言状态
 );
 
