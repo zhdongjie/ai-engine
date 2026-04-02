@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, AsyncIterator, Dict, List
+from typing import Any, AsyncIterator, Dict
 
 from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.runnables import RunnableConfig
@@ -9,33 +9,17 @@ from ai_engine.chains.common.query_transformer import transform_queries
 from ai_engine.chains.rag_plugins import get_rag_plugins
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
-from ai_engine.core.settings import settings
 from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
-from ai_engine.infra.db.vdb import vdb_manager
 from ai_engine.utils.retrieval_utils import (
     assess_retrieval_quality,
+    collect_candidate_documents,
     compress_context_documents,
-    dedupe_documents,
+    extract_relevant_segments,
     format_docs_with_sources,
     get_reranked_docs,
-    reciprocal_rank_fusion,
+    resolve_retrieval_runtime_config,
     select_top_documents,
 )
-
-
-async def _semantic_search(query: str, search_k: int, user_lang: str) -> List:
-    search_kwargs = {
-        "k": search_k,
-        "filter": {"lang": user_lang},
-    }
-    retriever = vdb_manager.store.as_retriever(search_kwargs=search_kwargs)
-    docs = await asyncio.to_thread(retriever.invoke, query)
-
-    if docs:
-        return docs
-
-    fallback_retriever = vdb_manager.store.as_retriever(search_kwargs={"k": search_k})
-    return await asyncio.to_thread(fallback_retriever.invoke, query)
 
 
 async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) -> AsyncIterator[BaseMessage]:
@@ -48,66 +32,20 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
     user_lang = configurable.get("lang", "zh")
     prompt_data = get_prompt_config(biz_type)
     retrieval_config = prompt_data.get("retrieval_config", {})
-
-    search_k = retrieval_config.get("k", settings.VECTOR_SEARCH_TOP_K)
-    lexical_k = retrieval_config.get("lexical_k", settings.LEXICAL_SEARCH_TOP_K)
-    enable_query_transform = retrieval_config.get(
-        "enable_query_transform",
-        settings.ENABLE_QUERY_TRANSFORM,
-    )
-    enable_lexical_retrieval = retrieval_config.get(
-        "enable_lexical_retrieval",
-        settings.ENABLE_LEXICAL_RETRIEVAL,
-    )
-    enable_context_enrichment = retrieval_config.get(
-        "enable_context_enrichment",
-        settings.ENABLE_CONTEXT_ENRICHMENT,
-    )
-    context_window_size = retrieval_config.get(
-        "context_window_size",
-        settings.CONTEXT_WINDOW_SIZE,
-    )
-    enable_retrieval_quality_check = retrieval_config.get(
-        "enable_retrieval_quality_check",
-        settings.ENABLE_RETRIEVAL_QUALITY_CHECK,
-    )
-    enable_context_compression = retrieval_config.get(
-        "enable_context_compression",
-        settings.ENABLE_CONTEXT_COMPRESSION,
-    )
-    max_context_chunks = retrieval_config.get(
-        "max_context_chunks",
-        settings.MAX_CONTEXT_CHUNKS,
-    )
-    max_context_characters = retrieval_config.get(
-        "max_context_characters",
-        settings.MAX_CONTEXT_CHARACTERS,
-    )
+    runtime_config = resolve_retrieval_runtime_config(retrieval_config)
 
     queries = [user_input]
-    if enable_query_transform:
+    if runtime_config["enable_query_transform"]:
         queries = transform_queries(user_input=user_input, history=history, config=config)
     logger.info(f"RAG queries prepared: {queries}")
 
-    semantic_result_sets = []
-    for query in queries:
-        semantic_docs = await _semantic_search(query=query, search_k=search_k, user_lang=user_lang)
-        semantic_result_sets.append(semantic_docs)
-
-    lexical_result_sets = []
-    if enable_lexical_retrieval:
-        for query in queries:
-            lexical_docs = await asyncio.to_thread(knowledge_corpus.keyword_search, query, lexical_k)
-            lexical_result_sets.append(lexical_docs)
-
-    candidate_sets = [*semantic_result_sets, *lexical_result_sets]
-    if len(candidate_sets) > 1:
-        candidate_docs = reciprocal_rank_fusion(candidate_sets)
-    else:
-        candidate_docs = dedupe_documents(candidate_sets[0] if candidate_sets else [])
-
-    candidate_limit = max(search_k, lexical_k) * max(1, len(queries))
-    candidate_docs = candidate_docs[:candidate_limit]
+    candidate_docs = await collect_candidate_documents(
+        queries=queries,
+        search_k=runtime_config["search_k"],
+        lexical_k=runtime_config["lexical_k"],
+        user_lang=user_lang,
+        enable_lexical_retrieval=runtime_config["enable_lexical_retrieval"],
+    )
     logger.info(f"RAG candidate retrieval completed with {len(candidate_docs)} chunks")
 
     final_docs = await asyncio.to_thread(get_reranked_docs, user_input, candidate_docs)
@@ -124,7 +62,7 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
     }
     relaxed_retrieval_used = False
 
-    if enable_retrieval_quality_check:
+    if runtime_config["enable_retrieval_quality_check"]:
         retrieval_quality = assess_retrieval_quality(final_docs)
         if retrieval_quality["should_retry"] and candidate_docs:
             relaxed_docs = await asyncio.to_thread(
@@ -132,7 +70,7 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
                 user_input,
                 candidate_docs,
                 0.0,
-                max_context_chunks,
+                runtime_config["max_context_chunks"],
             )
             relaxed_quality = assess_retrieval_quality(relaxed_docs)
 
@@ -153,21 +91,50 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
             )
 
     anchor_docs = final_docs
-    if enable_context_compression and anchor_docs:
-        anchor_docs = select_top_documents(anchor_docs, max_context_chunks)
+    if runtime_config["enable_context_compression"] and anchor_docs:
+        anchor_docs = select_top_documents(anchor_docs, runtime_config["max_context_chunks"])
         logger.info(f"Context anchor selection kept {len(anchor_docs)} chunks")
 
-    if enable_context_enrichment and anchor_docs:
-        final_docs = knowledge_corpus.expand_with_neighbors(anchor_docs, context_window_size)
+    parent_context_used = False
+    if runtime_config["enable_small_to_big_retrieval"] and anchor_docs:
+        final_docs = knowledge_corpus.expand_to_parent_context(
+            anchor_docs,
+            max_parent_chunks=runtime_config["small_to_big_max_parent_chunks"],
+            fallback_window_size=runtime_config["small_to_big_fallback_window_size"],
+        )
+        parent_context_used = bool(final_docs)
+        logger.info(f"Small-to-Big retrieval expanded context to {len(final_docs)} chunks")
+    elif runtime_config["enable_context_enrichment"] and anchor_docs:
+        final_docs = knowledge_corpus.expand_with_neighbors(anchor_docs, runtime_config["context_window_size"])
         logger.info(f"Context enrichment expanded retrieval to {len(final_docs)} chunks")
     else:
         final_docs = anchor_docs
 
-    if enable_context_compression and final_docs:
+    rse_summary = {
+        "segment_count": 0,
+        "retained_doc_count": len(final_docs),
+        "dropped_doc_count": 0,
+        "selected_segment_scores": [],
+        "applied": False,
+    }
+    if runtime_config["enable_relevant_segment_extraction"] and final_docs:
+        final_docs, rse_summary = extract_relevant_segments(
+            final_docs,
+            similarity_threshold=runtime_config["rse_similarity_threshold"],
+            segment_score_threshold=runtime_config["rse_segment_score_threshold"],
+            window_size=runtime_config["rse_window_size"],
+            max_segments=runtime_config["rse_max_segments"],
+        )
+        logger.info(
+            f"RSE retained {rse_summary['retained_doc_count']} chunks across "
+            f"{rse_summary['segment_count']} segments"
+        )
+
+    if runtime_config["enable_context_compression"] and final_docs:
         final_docs = compress_context_documents(
             final_docs,
-            max_chunks=max_context_chunks,
-            max_characters=max_context_characters,
+            max_chunks=runtime_config["max_context_chunks"],
+            max_characters=runtime_config["max_context_characters"],
         )
         logger.info(f"Context compression kept {len(final_docs)} chunks")
 
@@ -177,6 +144,8 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
         "retrieval_quality": retrieval_quality,
         "retrieval_confident": retrieval_quality.get("is_confident", bool(final_docs)),
         "relaxed_retrieval_used": relaxed_retrieval_used,
+        "parent_context_used": parent_context_used,
+        "rse_summary": rse_summary,
     }
 
     plugins = get_rag_plugins(biz_type)
@@ -185,7 +154,9 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
 
     if not context.strip():
         logger.warning("RAG context is empty after retrieval and enrichment")
-        yield AIMessageChunk(content="抱歉，在当前的专属知识库中，没有找到与您问题相关的参考资料。")
+        yield AIMessageChunk(
+            content="Sorry, no relevant reference content was found in the current knowledge base."
+        )
         yield AIMessageChunk(
             content="",
             additional_kwargs={
@@ -204,14 +175,14 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
             prompt_data = get_prompt_config(biz_type)
 
     async for chunk in stream_llm_response(
-            user_input=user_input,
-            history=history,
-            biz_type=biz_type,
-            prompt_data=prompt_data,
-            context=context,
-            extra_data=extra_data,
-            sources=sources,
-            config=config,
-            intent="RAG"
+        user_input=user_input,
+        history=history,
+        biz_type=biz_type,
+        prompt_data=prompt_data,
+        context=context,
+        extra_data=extra_data,
+        sources=sources,
+        config=config,
+        intent="RAG",
     ):
         yield chunk

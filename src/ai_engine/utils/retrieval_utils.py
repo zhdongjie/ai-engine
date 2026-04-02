@@ -1,8 +1,12 @@
-from typing import Dict, Iterable, List, Sequence, Tuple
+import asyncio
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Tuple
 
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
+from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
 from ai_engine.infra.llm.llm_factory import LLMFactory
+from ai_engine.infra.db.vdb import vdb_manager
 
 
 def get_doc_key(doc) -> str:
@@ -23,6 +27,119 @@ def get_source_key(doc) -> str:
     return str(metadata.get("file_name", "unknown"))
 
 
+def resolve_retrieval_runtime_config(retrieval_config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    config = retrieval_config or {}
+    return {
+        "search_k": config.get("k", settings.VECTOR_SEARCH_TOP_K),
+        "lexical_k": config.get("lexical_k", settings.LEXICAL_SEARCH_TOP_K),
+        "enable_query_transform": config.get(
+            "enable_query_transform",
+            settings.ENABLE_QUERY_TRANSFORM,
+        ),
+        "enable_lexical_retrieval": config.get(
+            "enable_lexical_retrieval",
+            settings.ENABLE_LEXICAL_RETRIEVAL,
+        ),
+        "enable_context_enrichment": config.get(
+            "enable_context_enrichment",
+            settings.ENABLE_CONTEXT_ENRICHMENT,
+        ),
+        "context_window_size": config.get(
+            "context_window_size",
+            settings.CONTEXT_WINDOW_SIZE,
+        ),
+        "enable_small_to_big_retrieval": config.get(
+            "enable_small_to_big_retrieval",
+            settings.ENABLE_SMALL_TO_BIG_RETRIEVAL,
+        ),
+        "small_to_big_max_parent_chunks": config.get(
+            "small_to_big_max_parent_chunks",
+            settings.SMALL_TO_BIG_MAX_PARENT_CHUNKS,
+        ),
+        "small_to_big_fallback_window_size": config.get(
+            "small_to_big_fallback_window_size",
+            settings.SMALL_TO_BIG_FALLBACK_WINDOW_SIZE,
+        ),
+        "enable_retrieval_quality_check": config.get(
+            "enable_retrieval_quality_check",
+            settings.ENABLE_RETRIEVAL_QUALITY_CHECK,
+        ),
+        "enable_relevant_segment_extraction": config.get(
+            "enable_relevant_segment_extraction",
+            settings.ENABLE_RELEVANT_SEGMENT_EXTRACTION,
+        ),
+        "rse_similarity_threshold": config.get(
+            "rse_similarity_threshold",
+            settings.RSE_SIMILARITY_THRESHOLD,
+        ),
+        "rse_segment_score_threshold": config.get(
+            "rse_segment_score_threshold",
+            settings.RSE_SEGMENT_SCORE_THRESHOLD,
+        ),
+        "rse_window_size": config.get(
+            "rse_window_size",
+            settings.RSE_WINDOW_SIZE,
+        ),
+        "rse_max_segments": config.get(
+            "rse_max_segments",
+            settings.RSE_MAX_SEGMENTS,
+        ),
+        "enable_context_compression": config.get(
+            "enable_context_compression",
+            settings.ENABLE_CONTEXT_COMPRESSION,
+        ),
+        "max_context_chunks": config.get(
+            "max_context_chunks",
+            settings.MAX_CONTEXT_CHUNKS,
+        ),
+        "max_context_characters": config.get(
+            "max_context_characters",
+            settings.MAX_CONTEXT_CHARACTERS,
+        ),
+    }
+
+
+async def semantic_search(query: str, search_k: int, user_lang: str) -> List:
+    search_kwargs = {
+        "k": search_k,
+        "filter": {"lang": user_lang},
+    }
+    retriever = vdb_manager.store.as_retriever(search_kwargs=search_kwargs)
+    docs = await asyncio.to_thread(retriever.invoke, query)
+
+    if docs:
+        return docs
+
+    fallback_retriever = vdb_manager.store.as_retriever(search_kwargs={"k": search_k})
+    return await asyncio.to_thread(fallback_retriever.invoke, query)
+
+
+async def collect_candidate_documents(
+        queries: Sequence[str],
+        search_k: int,
+        lexical_k: int,
+        user_lang: str,
+        enable_lexical_retrieval: bool = True,
+) -> List:
+    semantic_result_sets = []
+    for query in queries:
+        semantic_result_sets.append(await semantic_search(query, search_k, user_lang))
+
+    lexical_result_sets = []
+    if enable_lexical_retrieval:
+        for query in queries:
+            lexical_result_sets.append(await asyncio.to_thread(knowledge_corpus.keyword_search, query, lexical_k))
+
+    candidate_sets = [*semantic_result_sets, *lexical_result_sets]
+    if len(candidate_sets) > 1:
+        candidate_docs = reciprocal_rank_fusion(candidate_sets)
+    else:
+        candidate_docs = dedupe_documents(candidate_sets[0] if candidate_sets else [])
+
+    candidate_limit = max(search_k, lexical_k) * max(1, len(queries))
+    return candidate_docs[:candidate_limit]
+
+
 def _get_doc_score(doc, score_key: str = "rerank_score") -> float:
     metadata = getattr(doc, "metadata", {}) or {}
     score = metadata.get(score_key)
@@ -32,6 +149,41 @@ def _get_doc_score(doc, score_key: str = "rerank_score") -> float:
         return float(score or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _get_anchor_chunk_index(doc) -> int:
+    metadata = getattr(doc, "metadata", {}) or {}
+    anchor_chunk_index = metadata.get("retrieval_anchor_chunk_index", metadata.get("chunk_index", 0))
+    try:
+        return int(anchor_chunk_index)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _get_chunk_index(doc) -> int:
+    metadata = getattr(doc, "metadata", {}) or {}
+    chunk_index = metadata.get("chunk_index", 0)
+    try:
+        return int(chunk_index)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _get_anchor_distance(doc) -> int:
+    metadata = getattr(doc, "metadata", {}) or {}
+    if metadata.get("neighbor_distance") is not None:
+        try:
+            return abs(int(metadata.get("neighbor_distance", 0)))
+        except (TypeError, ValueError):
+            return 0
+    return abs(_get_chunk_index(doc) - _get_anchor_chunk_index(doc))
+
+
+def _get_segment_key(doc) -> Tuple[str, int]:
+    metadata = getattr(doc, "metadata", {}) or {}
+    anchor_source_key = str(metadata.get("retrieval_anchor_source_key", get_source_key(doc)))
+    anchor_chunk_index = _get_anchor_chunk_index(doc)
+    return anchor_source_key, anchor_chunk_index
 
 
 def dedupe_documents(docs: Iterable) -> List:
@@ -205,6 +357,123 @@ def compress_context_documents(
         current_chars += block_size
 
     return compressed_docs
+
+
+def extract_relevant_segments(
+        docs: Sequence,
+        similarity_threshold: float | None = None,
+        segment_score_threshold: float | None = None,
+        window_size: int | None = None,
+        max_segments: int | None = None,
+) -> Tuple[List, Dict[str, object]]:
+    """Filter expanded retrieval context into a smaller set of high-value segments."""
+    unique_docs = dedupe_documents(docs)
+    if not unique_docs:
+        return [], {
+            "segment_count": 0,
+            "retained_doc_count": 0,
+            "dropped_doc_count": 0,
+            "selected_segment_scores": [],
+            "applied": False,
+        }
+
+    similarity_floor = settings.RSE_SIMILARITY_THRESHOLD if similarity_threshold is None else similarity_threshold
+    segment_floor = settings.RSE_SEGMENT_SCORE_THRESHOLD if segment_score_threshold is None else segment_score_threshold
+    distance_limit = settings.RSE_WINDOW_SIZE if window_size is None else window_size
+    segment_limit = settings.RSE_MAX_SEGMENTS if max_segments is None else max_segments
+
+    grouped_docs: DefaultDict[Tuple[str, int], List] = defaultdict(list)
+    for doc in unique_docs:
+        grouped_docs[_get_segment_key(doc)].append(doc)
+
+    segment_items = []
+    for segment_key, segment_docs in grouped_docs.items():
+        filtered_docs = []
+        doc_scores = []
+
+        for doc in sorted(segment_docs, key=_get_chunk_index):
+            score = max(_get_doc_score(doc, "rerank_score"), _get_doc_score(doc, "fusion_score"))
+            distance = _get_anchor_distance(doc)
+            if score < similarity_floor and not doc.metadata.get("is_retrieval_anchor", False):
+                continue
+            if distance_limit is not None and distance_limit >= 0 and distance > distance_limit:
+                continue
+
+            distance_penalty = max(0.0, 1.0 - (distance * 0.15))
+            weighted_score = score * distance_penalty
+            doc.metadata["rse_doc_score"] = round(weighted_score, 6)
+            filtered_docs.append(doc)
+            doc_scores.append(weighted_score)
+
+        if not filtered_docs:
+            continue
+
+        top_score = max(doc_scores)
+        avg_score = sum(doc_scores) / len(doc_scores)
+        anchor_bonus = 0.05 if any(doc.metadata.get("is_retrieval_anchor", False) for doc in filtered_docs) else 0.0
+        segment_score = top_score * 0.7 + avg_score * 0.3 + anchor_bonus
+        if segment_score < segment_floor:
+            continue
+
+        for doc in filtered_docs:
+            doc.metadata["rse_segment_score"] = round(segment_score, 6)
+
+        segment_items.append((segment_key, segment_score, filtered_docs))
+
+    segment_items.sort(key=lambda item: item[1], reverse=True)
+    if segment_limit is not None and segment_limit > 0:
+        segment_items = segment_items[:segment_limit]
+
+    retained_docs = []
+    seen = set()
+    selected_scores = []
+    for _, segment_score, segment_docs in segment_items:
+        selected_scores.append(round(segment_score, 6))
+        for doc in segment_docs:
+            key = get_doc_key(doc)
+            if key in seen:
+                continue
+            seen.add(key)
+            doc.metadata["rse_selected"] = True
+            retained_docs.append(doc)
+
+    retained_docs.sort(key=lambda item: (get_source_key(item), _get_chunk_index(item)))
+    return retained_docs, {
+        "segment_count": len(segment_items),
+        "retained_doc_count": len(retained_docs),
+        "dropped_doc_count": max(0, len(unique_docs) - len(retained_docs)),
+        "selected_segment_scores": selected_scores,
+        "applied": bool(segment_items),
+    }
+
+
+def summarize_retrieved_documents(docs: Sequence, limit: int | None = None) -> List[Dict[str, object]]:
+    """Build a structured diagnostics view for retrieved documents."""
+    unique_docs = dedupe_documents(docs)
+    if limit is not None and limit > 0:
+        unique_docs = unique_docs[:limit]
+
+    summaries: List[Dict[str, object]] = []
+    for doc in unique_docs:
+        metadata = getattr(doc, "metadata", {}) or {}
+        summaries.append(
+            {
+                "source_key": str(metadata.get("source_key", "")),
+                "file_name": str(metadata.get("file_name", "unknown")),
+                "header_path": str(metadata.get("header_path", "")),
+                "chunk_index": _get_chunk_index(doc),
+                "anchor_chunk_index": _get_anchor_chunk_index(doc),
+                "anchor_distance": _get_anchor_distance(doc),
+                "rerank_score": round(_get_doc_score(doc, "rerank_score"), 6),
+                "fusion_score": round(_get_doc_score(doc, "fusion_score"), 6),
+                "rse_doc_score": round(_get_doc_score(doc, "rse_doc_score"), 6),
+                "rse_segment_score": round(_get_doc_score(doc, "rse_segment_score"), 6),
+                "is_retrieval_anchor": bool(metadata.get("is_retrieval_anchor", False)),
+                "content_preview": doc.page_content[:160].replace("\n", " ").strip(),
+            }
+        )
+
+    return summaries
 
 
 def format_docs_with_sources(docs: list) -> Tuple[str, List[str]]:

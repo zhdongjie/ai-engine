@@ -7,7 +7,7 @@ from sqlalchemy import text
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
 from ai_engine.infra.db.pgsql import db_manager
-from scripts.init_knowledge_db import run_init as init_knowledge_db
+from ai_engine.knowledge.initializer import run_init as init_knowledge_db
 
 
 # ========================

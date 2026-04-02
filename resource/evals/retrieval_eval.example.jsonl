@@ -1,0 +1,2 @@
+{"case_id":"virtual_card_activation_en","query":"How does virtual card activation work?","biz_type":"virtual_card","lang":"en","tags":["activation","baseline"],"expected_sources":["activation_guide.md"],"expected_headers":["Card Activation"]}
+{"case_id":"virtual_insurance_claim_zh","query":"What are the requirements for a virtual insurance claim?","biz_type":"virtual_insurance","lang":"zh","tags":["claim","baseline"],"expected_sources":["claim_rules.md"],"expected_headers":["Claim Requirements"]}
