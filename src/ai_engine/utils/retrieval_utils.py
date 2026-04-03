@@ -8,7 +8,7 @@ from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
 from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
 from ai_engine.infra.db.vdb import vdb_manager
-from ai_engine.infra.llm.llm_factory import LLMFactory
+from ai_engine.infra.llm.factory import call_rerank
 from ai_engine.utils.doc_utils import get_doc_key
 
 
@@ -235,7 +235,7 @@ def get_reranked_docs(
 
     documents_text = [doc.page_content for doc in initial_docs]
     try:
-        resp = LLMFactory.call_rerank(
+        resp = call_rerank(
             query=query,
             documents=documents_text,
         )

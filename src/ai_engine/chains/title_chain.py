@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from ai_engine.chains.rag_plugins import get_rag_plugins
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
-from ai_engine.infra.llm.llm_factory import LLMFactory
+from ai_engine.infra.llm.factory import get_llm_model
 
 
 def generate_session_title(user_content: str, config: RunnableConfig) -> str:
@@ -37,7 +37,7 @@ def generate_session_title(user_content: str, config: RunnableConfig) -> str:
         messages.append(("human", "{user_content}"))
 
         prompt_template = ChatPromptTemplate.from_messages(messages)
-        llm = LLMFactory.get_model(prompt_data.get("config", {}))
+        llm = get_llm_model(prompt_data.get("config", {}))
 
         chain = prompt_template | llm | StrOutputParser()
 

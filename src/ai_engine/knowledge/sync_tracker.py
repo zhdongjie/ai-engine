@@ -118,7 +118,7 @@ class KBSyncTracker:
                     session.add(record)
 
             session.commit()
-            logger.success(f"✅ 成功将 {len(self.pending_updates)} 个文档的指纹同步至 PostgreSQL")
+            logger.success(f"成功将 {len(self.pending_updates)} 个文档的指纹同步至 PostgreSQL")
 
         # 3. 清空队列，防止污染下次运行
         self.pending_updates.clear()

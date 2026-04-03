@@ -2,7 +2,7 @@
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
 from ai_engine.infra.embedding.factory import get_embedding_provider
-from ai_engine.infra.vector_store.factory import VectorStoreFactory
+from ai_engine.infra.vector_store.factory import get_vector_provider
 from ai_engine.knowledge.document_loader import load_documents
 from ai_engine.knowledge.sync_tracker import sync_tracker
 
@@ -18,7 +18,7 @@ def run_init():
     embeddings = get_embedding_provider()
 
     # 2. 获取 Provider
-    provider = VectorStoreFactory.get_provider(embeddings)
+    provider = get_vector_provider(embeddings)
 
     # 3. 处理全量覆盖
     if mode == "overwrite":

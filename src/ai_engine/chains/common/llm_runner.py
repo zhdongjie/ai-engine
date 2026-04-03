@@ -5,7 +5,7 @@ from langchain_core.messages import BaseMessage, AIMessageChunk
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableConfig
 
-from ai_engine.infra.llm.llm_factory import LLMFactory
+from ai_engine.infra.llm.factory import get_llm_model
 
 
 async def stream_llm_response(
@@ -34,7 +34,7 @@ async def stream_llm_response(
     clean_extra = {k: v for k, v in extra_data.items() if k != "injected_messages"}
 
     # 1. 初始化模型
-    llm = LLMFactory.get_model(
+    llm = get_llm_model(
         model_config,
         streaming=True,
         model_kwargs={"stream_options": {"include_usage": True}}

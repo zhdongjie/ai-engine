@@ -30,8 +30,9 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
     user_input = input_data.get("input", "")
     history = input_data.get("history", [])
 
-    user_level = input_data.get("user_level", "default")
     configurable = config.get("configurable") or {}
+
+    user_level = configurable.get("user_level", "default")
     user_lang = configurable.get("lang", "zh")
 
     kb_config = kb_manager.get_kb_config(biz_type)

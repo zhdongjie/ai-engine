@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
 from ai_engine.core.settings import settings
-from ai_engine.infra.llm.llm_factory import LLMFactory
+from ai_engine.infra.llm.factory import get_llm_model
 
 
 def _stringify_message(message: BaseMessage) -> str | None:
@@ -64,7 +64,7 @@ def transform_queries(
             ),
         ]
     )
-    llm = LLMFactory.get_model(prompt_data.get("config", {}))
+    llm = get_llm_model(prompt_data.get("config", {}))
     chain = prompt_template | llm | StrOutputParser()
 
     try:

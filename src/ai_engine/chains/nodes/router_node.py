@@ -10,13 +10,13 @@ from ai_engine.chains.nodes.rag_node import dynamic_rag_run
 from ai_engine.core.kb_manager import kb_manager
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
-from ai_engine.infra.llm.llm_factory import LLMFactory
+from ai_engine.infra.llm.factory import get_llm_model
 
 # -------------------------
 # Router 配置
 # -------------------------
 router_config = get_prompt_config("intent_router")
-router_llm = LLMFactory.get_model(router_config.get("config", {}))
+router_llm = get_llm_model(router_config.get("config", {}))
 router_prompt = PromptTemplate.from_template(router_config["content"])
 
 

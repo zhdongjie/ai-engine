@@ -1,5 +1,5 @@
 from ai_engine.infra.embedding.factory import get_embedding_provider
-from ai_engine.infra.vector_store.factory import VectorStoreFactory
+from ai_engine.infra.vector_store.factory import get_vector_provider
 
 
 class VectorStoreManager:
@@ -21,7 +21,7 @@ class VectorStoreManager:
     @property
     def provider(self):
         if self._provider is None:
-            self._provider = VectorStoreFactory.get_provider(self.embedding_provider)
+            self._provider = get_vector_provider(self.embedding_provider)
         return self._provider
 
     @property
