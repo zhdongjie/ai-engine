@@ -8,9 +8,6 @@ config:
   temperature: 0           # RAG 场景必须 0，保证稳定性
   max_tokens: 1500         # 限制输出长度
 
-retrieval_config:
-  k: 3                     # 默认检索 3 条知识
-
 # --- 提示词内容 (Content) ---
 content: |
   # Role

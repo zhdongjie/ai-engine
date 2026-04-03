@@ -7,9 +7,6 @@ config:
   model: "qwen-max"        # 保险条款复杂，建议用更强的模型
   temperature: 0.2         # 保持严谨，但比信用卡稍微亲和一点点
 
-retrieval_config:
-  k: 3
-
 # --- 提示词内容 ---
 content: |
   # Role

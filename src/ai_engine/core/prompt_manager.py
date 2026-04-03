@@ -30,7 +30,6 @@ def _read_prompt_file(prompt_name: str) -> Dict[str, Any] | None:
                     return {
                         "content": data.get("content", "").strip(),
                         "config": data.get("config", {}),
-                        "retrieval_config": data.get("retrieval_config", {}),
                         "source": file_path
                     }
 
@@ -40,7 +39,6 @@ def _read_prompt_file(prompt_name: str) -> Dict[str, Any] | None:
                     return {
                         "content": content,
                         "config": {},
-                        "retrieval_config": {},
                         "source": file_path
                     }
         except Exception as e:
@@ -73,5 +71,4 @@ def get_prompt_config(prompt_name: str = "default") -> Dict[str, Any]:
     return {
         "content": "你是一个专业的 AI 助手。请根据已知知识回答问题：\n\n{context}",
         "config": {"temperature": 0, "model": settings.QWEN_MODEL_LLM},
-        "retrieval_config": {},
     }

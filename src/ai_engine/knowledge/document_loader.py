@@ -1,3 +1,4 @@
+# src/ai_engine/knowledge/document_loader.py
 import json
 import os
 import re
@@ -10,9 +11,11 @@ from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader, T
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 
+from ai_engine.core.kb_manager import kb_manager
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
 from ai_engine.knowledge.processors.factory import get_processor
+from ai_engine.knowledge.sync_tracker import sync_tracker
 
 
 def _build_header_path(metadata: dict) -> str:
@@ -89,7 +92,8 @@ def _get_overlap_tail(text: str, max_length: int) -> str:
     return " ".join(sentence_parts[-2:]).strip()
 
 
-def _semantic_split_documents(docs: List[Document], fallback_splitter: RecursiveCharacterTextSplitter) -> List[Document]:
+def _semantic_split_documents(docs: List[Document], fallback_splitter: RecursiveCharacterTextSplitter) -> List[
+    Document]:
     semantic_docs: List[Document] = []
 
     for doc in docs:
@@ -140,8 +144,8 @@ def _semantic_split_documents(docs: List[Document], fallback_splitter: Recursive
 
 
 def _split_documents_for_ingestion(
-    docs: List[Document],
-    fallback_splitter: RecursiveCharacterTextSplitter,
+        docs: List[Document],
+        fallback_splitter: RecursiveCharacterTextSplitter,
 ) -> tuple[List[Document], str]:
     if not docs:
         return [], "empty"
@@ -155,11 +159,11 @@ def _split_documents_for_ingestion(
 
 
 def _enrich_chunk_metadata(
-    docs: List[Document],
-    biz_type: str,
-    file_name: str,
-    source_type: str,
-    chunk_strategy: str,
+        docs: List[Document],
+        biz_type: str,
+        file_name: str,
+        source_type: str,
+        chunk_strategy: str,
 ) -> None:
     source_key = f"{biz_type}:{file_name}"
     total_chunks = len(docs)
@@ -275,79 +279,133 @@ def load_documents() -> List[Document]:
         logger.error(f"Knowledge directory does not exist: {knowledge_root}")
         return []
 
-    for biz_dir in knowledge_root.iterdir():
-        if not biz_dir.is_dir():
-            continue
+    mode = settings.KB_INIT_MODE.lower()
 
-        biz_type = biz_dir.name
-        logger.info(f"Parsing business knowledge directory: [{biz_type}]")
+    for biz_type, kb_config in kb_manager.registry.items():
+        logger.info(f"Parsing business knowledge for KB: [{biz_type}]")
         processor = get_processor(biz_type)
 
-        for markdown_path in biz_dir.glob("**/*.md"):
+        knowledge_config = kb_config.get("knowledge_path", biz_type)
+        if isinstance(knowledge_config, dict):
+            lang_path_map = knowledge_config
+        else:
+            lang_path_map = {"zh": knowledge_config}  # 默认兜底为中文
+
+        for lang, path_suffix in lang_path_map.items():
+            biz_dir = knowledge_root / path_suffix
+
+            if not biz_dir.exists() or not biz_dir.is_dir():
+                logger.warning(f"KB [{biz_type}] lang [{lang}] 的目录不存在，跳过: {biz_dir}")
+                continue
+
+            logger.info(f"Loading docs for KB [{biz_type}] lang [{lang}] from {biz_dir}")
+
+            for markdown_path in biz_dir.glob("**/*.md"):
+                try:
+                    action = sync_tracker.inspect_document(markdown_path, biz_type)
+
+                    if mode == "incremental" and action == "skip":
+                        continue
+
+                    path_md5 = sync_tracker.get_path_md5(markdown_path)
+
+                    content = markdown_path.read_text(encoding="utf-8")
+                    extracted_meta = {"lang": lang, "path_md5": path_md5}
+                    if processor:
+                        content, proc_meta = processor.process(content, markdown_path)
+                        extracted_meta.update(proc_meta)
+
+                    markdown_splits = markdown_splitter.split_text(content)
+                    final_splits, chunk_strategy = _split_documents_for_ingestion(markdown_splits, text_splitter)
+
+                    _enrich_chunk_metadata(
+                        final_splits,
+                        biz_type=biz_type,
+                        file_name=markdown_path.name,
+                        source_type="markdown",
+                        chunk_strategy=chunk_strategy,
+                    )
+
+                    for doc in final_splits:
+                        doc.metadata.update(extracted_meta)
+
+                    _apply_document_augmentation(final_splits)
+                    all_docs.extend(final_splits)
+                except Exception as exc:
+                    logger.error(f"Failed to parse markdown file {markdown_path}: {exc}")
+
             try:
-                content = markdown_path.read_text(encoding="utf-8")
-
-                extracted_meta = {}
-                if processor:
-                    content, extracted_meta = processor.process(content, markdown_path)
-
-                markdown_splits = markdown_splitter.split_text(content)
-                final_splits, chunk_strategy = _split_documents_for_ingestion(markdown_splits, text_splitter)
-                _enrich_chunk_metadata(
-                    final_splits,
-                    biz_type=biz_type,
-                    file_name=markdown_path.name,
-                    source_type="markdown",
-                    chunk_strategy=chunk_strategy,
+                # 1. 依然使用 DirectoryLoader 加载原始文档
+                txt_loader = DirectoryLoader(
+                    str(biz_dir),
+                    glob="**/*.txt",
+                    loader_cls=TextLoader,
+                    loader_kwargs={"encoding": "utf-8"}
                 )
-                for doc in final_splits:
-                    doc.metadata.update(extracted_meta)
-                _apply_document_augmentation(final_splits)
-                all_docs.extend(final_splits)
+                pdf_loader = DirectoryLoader(
+                    str(biz_dir),
+                    glob="**/*.pdf",
+                    loader_cls=PyPDFLoader,  # type: ignore
+                )
+
+                raw_docs = txt_loader.load() + pdf_loader.load()
+
+                # 过滤掉未变动的文档，并收集有效文档
+                filtered_raw_docs = []
+                mode = settings.KB_INIT_MODE.lower()
+
+                for raw_doc in raw_docs:
+                    source_path = Path(str(raw_doc.metadata.get("source", "")))
+
+                    # 增加拦截逻辑：如果指纹一致且是增量模式，直接跳过
+                    action = sync_tracker.inspect_document(source_path, biz_type)
+                    if mode == "incremental" and action == "skip":
+                        continue
+
+                    content = raw_doc.page_content
+
+                    # 计算该文件的路径 MD5，用于后续删除和追踪
+                    path_md5 = sync_tracker.get_path_md5(source_path)
+                    extracted_meta = {
+                        "lang": lang,
+                        "path_md5": path_md5
+                    }
+
+                    if processor:
+                        content, proc_meta = processor.process(content, source_path)
+                        extracted_meta.update(proc_meta)
+
+                    raw_doc.page_content = content
+                    raw_doc.metadata.update(extracted_meta)
+                    filtered_raw_docs.append(raw_doc)
+
+                if not filtered_raw_docs:
+                    continue
+
+                grouped_docs = _group_documents_by_source(filtered_raw_docs)
+                for source, source_docs in grouped_docs.items():
+                    file_name = os.path.basename(source or "unknown")
+                    split_docs, chunk_strategy = _split_documents_for_ingestion(source_docs, text_splitter)
+
+                    _enrich_chunk_metadata(
+                        split_docs,
+                        biz_type=biz_type,
+                        file_name=file_name,
+                        source_type="file",
+                        chunk_strategy=chunk_strategy,
+                    )
+
+                    path_md5 = sync_tracker.get_path_md5(Path(source))
+                    for sd in split_docs:
+                        sd.metadata["path_md5"] = path_md5
+
+                    _apply_document_augmentation(split_docs)
+
+                    for split_doc in split_docs:
+                        if split_doc.page_content.strip():
+                            all_docs.append(split_doc)
+
             except Exception as exc:
-                logger.error(f"Failed to parse markdown file {markdown_path}: {exc}")
-
-        try:
-            txt_loader = DirectoryLoader(
-                str(biz_dir),
-                glob="**/*.txt",
-                loader_cls=TextLoader,
-                loader_kwargs={"encoding": "utf-8"},
-            )
-            pdf_loader = DirectoryLoader(
-                str(biz_dir),
-                glob="**/*.pdf",
-                loader_cls=PyPDFLoader,  # type: ignore
-            )
-
-            raw_docs = txt_loader.load() + pdf_loader.load()
-
-            for raw_doc in raw_docs:
-                source_path = Path(str(raw_doc.metadata.get("source", "")))
-                content = raw_doc.page_content
-                extracted_meta = {}
-                if processor:
-                    content, extracted_meta = processor.process(content, source_path)
-                raw_doc.page_content = content
-                raw_doc.metadata.update(extracted_meta)
-
-            grouped_docs = _group_documents_by_source(raw_docs)
-            for source, source_docs in grouped_docs.items():
-                file_name = os.path.basename(source or "unknown")
-                split_docs, chunk_strategy = _split_documents_for_ingestion(source_docs, text_splitter)
-                _enrich_chunk_metadata(
-                    split_docs,
-                    biz_type=biz_type,
-                    file_name=file_name,
-                    source_type="file",
-                    chunk_strategy=chunk_strategy,
-                )
-                _apply_document_augmentation(split_docs)
-
-                for split_doc in split_docs:
-                    if split_doc.page_content.strip():
-                        all_docs.append(split_doc)
-        except Exception as exc:
-            logger.error(f"Failed to parse TXT/PDF documents for [{biz_type}]: {exc}")
+                logger.error(f"Failed to parse TXT/PDF documents for [{biz_type}]: {exc}")
 
     return all_docs

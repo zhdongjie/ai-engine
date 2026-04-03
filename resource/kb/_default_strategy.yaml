@@ -1,0 +1,13 @@
+# 默认的检索与上下文装配策略
+retrieval:
+  enable_query_transform: true
+  enable_lexical_retrieval: true
+  search_k: 5
+  lexical_k: 3
+
+context_assembly:
+  enable_context_enrichment: true
+  context_window_size: 2
+  enable_context_compression: true
+  max_context_chunks: 10
+  max_context_characters: 4000

@@ -32,18 +32,13 @@ def init_database():
 # 阶段 2：知识库初始化
 # ========================
 def init_knowledge_base():
-    v_type = settings.VECTOR_STORE_TYPE.lower()
+    mode = settings.KB_INIT_MODE.lower()
 
-    should_init = (
-            settings.INIT_KNOWLEDGE_BASE
-            or (v_type != "postgresql" and not os.path.exists(settings.chroma_persist_dir))
-    )
-
-    if not should_init:
-        logger.info("跳过知识库初始化")
-        return
-
-    logger.warning("开始知识库初始化...")
+    if (settings.VECTOR_STORE_TYPE.lower() != "postgresql"
+            and not os.path.exists(settings.chroma_persist_dir)):
+        if mode in ["skip", "none", "false"]:
+            logger.warning("未检测到本地 Chroma 向量库，自动覆盖配置，临时执行增量初始化...")
+            settings.KB_INIT_MODE = "incremental"
 
     try:
         init_knowledge_db()

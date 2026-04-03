@@ -1,13 +1,14 @@
 # src/ai_engine/infra/db/knowledge_corpus.py
-from copy import deepcopy
 from collections import defaultdict
-from typing import Dict, Iterable, List, Tuple
+from copy import deepcopy
+from typing import Dict, Iterable, List, Tuple, Optional
 
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
+from sqlalchemy import text
 
 from ai_engine.core.logger import logger
-from ai_engine.knowledge.document_loader import load_documents
+from ai_engine.infra.db.pgsql import db_manager
 from ai_engine.utils.doc_utils import get_doc_key
 
 CorpusKey = Tuple[str, int]
@@ -15,36 +16,37 @@ CorpusKey = Tuple[str, int]
 
 class KnowledgeCorpusManager:
     def __init__(self):
-        self._documents = None
-        self._bm25 = None
+        self._documents: Optional[List[Document]] = None
+        self._bm25: Optional[BM25Retriever] = None
         self._doc_map: Dict[CorpusKey, Document] = {}
         self._source_chunks: Dict[str, List[Document]] = defaultdict(list)
         self._section_chunks: Dict[Tuple[str, str], List[Document]] = defaultdict(list)
 
     @staticmethod
     def _clone_with_retrieval_metadata(doc: Document, **extra_metadata) -> Document:
+        """克隆文档并注入额外的检索元数据，确保不污染原始对象"""
         cloned_doc = deepcopy(doc)
         cloned_doc.metadata.update(extra_metadata)
         return cloned_doc
 
     @staticmethod
     def _iter_header_candidates(header_path: str) -> List[str]:
+        """将 'A > B > C' 拆解为 ['A > B > C', 'A > B', 'A'] 用于层级匹配"""
         clean_header = header_path.strip()
         if not clean_header:
             return []
-
         parts = [part.strip() for part in clean_header.split(">") if part.strip()]
         return [" > ".join(parts[:index]) for index in range(len(parts), 0, -1)]
 
     @staticmethod
     def _select_centered_window(docs: List[Document], anchor_chunk_index: int, limit: int) -> List[Document]:
+        """以目标切片为中心，选取固定数量的上下文窗口"""
         if limit <= 0 or len(docs) <= limit:
             return list(docs)
 
         anchor_position = 0
         for index, doc in enumerate(docs):
-            chunk_index = int(doc.metadata.get("chunk_index", 0))
-            if chunk_index == anchor_chunk_index:
+            if int(doc.metadata.get("chunk_index", 0)) == anchor_chunk_index:
                 anchor_position = index
                 break
 
@@ -55,23 +57,67 @@ class KnowledgeCorpusManager:
             start = max(0, end - limit)
         return docs[start:end]
 
+    @staticmethod
+    def _load_all_from_db() -> List[Document]:
+        """直接从 PostgreSQL 向量表拉取所有已存储的切片"""
+        sql = """
+              SELECT e.document, e.cmetadata
+              FROM langchain_pg_embedding e
+                       JOIN langchain_pg_collection c ON e.collection_id = c.uuid
+              WHERE c.name = 'ai_knowledge_base' \
+              """
+        docs = []
+        try:
+            with db_manager.engine.connect() as conn:
+                results = conn.execute(text(sql)).mappings().all()
+                for row in results:
+                    docs.append(Document(
+                        page_content=row['document'],
+                        metadata=row['cmetadata']
+                    ))
+            return docs
+        except Exception as e:
+            logger.error(f"从数据库提取 BM25 语料失败: {e}")
+            return []
+
     def _ensure_loaded(self) -> None:
+        """确保语料库和索引已加载到内存（懒加载模式）"""
         if self._documents is not None:
             return
 
-        documents = load_documents()
-        self._documents = documents
-        self._bm25 = BM25Retriever.from_documents(documents)
+        logger.info("正在从数据库构建关键词检索索引和元数据映射...")
+
+        documents = self._load_all_from_db()
+
+        if not documents:
+            logger.warning("关键词索引构建跳过：数据库中未找到任何文档切片。")
+            self._bm25 = None
+            self._documents = []
+            return
+
+        # 1. 构建 BM25 索引
+        try:
+            self._bm25 = BM25Retriever.from_documents(documents)
+            logger.info(f"成功构建 BM25 索引 (共 {len(documents)} 个文档)")
+        except Exception as e:
+            logger.error(f"构建 BM25 索引时出错: {e}")
+            self._bm25 = None
+
+        # 2. 填充元数据映射
         self._doc_map.clear()
         self._source_chunks.clear()
         self._section_chunks.clear()
+        self._documents = documents
 
         for doc in documents:
-            metadata = getattr(doc, "metadata", {}) or {}
-            source_key = metadata.get("source_key")
+            metadata = doc.metadata or {}
+            # 兼容性处理：优先取 source_key，没有则取 path_md5
+            source_key = metadata.get("source_key") or metadata.get("path_md5")
             chunk_index = metadata.get("chunk_index")
+
             if source_key is None or chunk_index is None:
                 continue
+
             key = (str(source_key), int(chunk_index))
             self._doc_map[key] = doc
             self._source_chunks[str(source_key)].append(doc)
@@ -80,22 +126,24 @@ class KnowledgeCorpusManager:
             if header_path:
                 self._section_chunks[(str(source_key), header_path)].append(doc)
 
-        for docs in self._source_chunks.values():
-            docs.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
-        for docs in self._section_chunks.values():
-            docs.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
+        # 3. 排序确保索引连续
+        for docs_list in self._source_chunks.values():
+            docs_list.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
+        for docs_list in self._section_chunks.values():
+            docs_list.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
 
-        logger.info(f"Knowledge corpus loaded for lexical retrieval: {len(documents)} chunks")
+        logger.info(f"语料库加载完成，当前活跃切片总数: {len(documents)}")
 
     def keyword_search(self, query: str, top_k: int) -> List[Document]:
+        """执行 BM25 关键词检索"""
         self._ensure_loaded()
         if self._bm25 is None:
             return []
-
         self._bm25.k = top_k
         return list(self._bm25.invoke(query))
 
     def expand_with_neighbors(self, docs: Iterable[Document], window_size: int) -> List[Document]:
+        """基于 chunk_index 扩展相邻切片，并确保分数继承"""
         self._ensure_loaded()
         if window_size <= 0:
             return list(docs)
@@ -104,9 +152,11 @@ class KnowledgeCorpusManager:
         seen = set()
 
         for doc in docs:
-            metadata = getattr(doc, "metadata", {}) or {}
-            source_key = metadata.get("source_key")
+            metadata = doc.metadata or {}
+            source_key = metadata.get("source_key") or metadata.get("path_md5")
             chunk_index = metadata.get("chunk_index")
+            r_score = metadata.get("rerank_score", 0.0)
+            f_score = metadata.get("fusion_score", 0.0)
 
             if source_key is None or chunk_index is None:
                 key = get_doc_key(doc)
@@ -120,25 +170,23 @@ class KnowledgeCorpusManager:
                 neighbor = self._doc_map.get(neighbor_key)
                 if neighbor is None:
                     continue
+
                 unique_key = get_doc_key(neighbor)
                 if unique_key in seen:
                     continue
+
                 seen.add(unique_key)
-                enriched_neighbor = self._clone_with_retrieval_metadata(
+                expanded.append(self._clone_with_retrieval_metadata(
                     neighbor,
                     retrieval_anchor_source_key=str(source_key),
                     retrieval_anchor_chunk_index=int(chunk_index),
                     neighbor_distance=offset,
-                    is_retrieval_anchor=offset == 0,
-                )
-                expanded.append(enriched_neighbor)
+                    is_retrieval_anchor=(offset == 0),
+                    rerank_score=r_score,
+                    fusion_score=f_score
+                ))
 
-        expanded.sort(
-            key=lambda item: (
-                str(item.metadata.get("source_key", "")),
-                int(item.metadata.get("chunk_index", 0)),
-            )
-        )
+        expanded.sort(key=lambda x: (str(x.metadata.get("source_key", "")), int(x.metadata.get("chunk_index", 0))))
         return expanded
 
     def expand_to_parent_context(
@@ -147,77 +195,66 @@ class KnowledgeCorpusManager:
             max_parent_chunks: int,
             fallback_window_size: int,
     ) -> List[Document]:
+        """扩展到父级上下文（基于 Markdown 标题或物理窗口），并确保分数继承"""
         self._ensure_loaded()
-
         expanded: List[Document] = []
         seen = set()
 
         for doc in docs:
-            metadata = getattr(doc, "metadata", {}) or {}
-            source_key = metadata.get("source_key")
-            chunk_index = metadata.get("chunk_index")
-            header_path = str(metadata.get("header_path", "")).strip()
+            meta = doc.metadata or {}
+            source_key = meta.get("source_key") or meta.get("path_md5")
+            chunk_index = meta.get("chunk_index")
+            header_path = str(meta.get("header_path", "")).strip()
+            r_score = meta.get("rerank_score", 0.0)
+            f_score = meta.get("fusion_score", 0.0)
 
             if source_key is None or chunk_index is None:
-                unique_key = get_doc_key(doc)
-                if unique_key in seen:
-                    continue
-                seen.add(unique_key)
                 expanded.append(doc)
                 continue
 
             parent_docs: List[Document] = []
             parent_header = ""
-            for candidate_header in self._iter_header_candidates(header_path):
-                candidate_docs = self._section_chunks.get((str(source_key), candidate_header), [])
-                if not candidate_docs:
-                    continue
-                parent_docs = self._select_centered_window(candidate_docs, int(chunk_index), max_parent_chunks)
-                parent_header = candidate_header
-                if len(parent_docs) > 1:
-                    break
+
+            # 1. 尝试基于 Markdown 标题层级寻找上下文
+            for cand in self._iter_header_candidates(header_path):
+                cand_docs = self._section_chunks.get((str(source_key), cand), [])
+                if cand_docs:
+                    parent_docs = self._select_centered_window(cand_docs, int(chunk_index), max_parent_chunks)
+                    parent_header = cand
+                    if len(parent_docs) > 1:
+                        break
 
             resolution = "section"
+            # 2. 降级方案：如果标题层级没结果，使用 fallback_window_size 物理窗口扩展
             if not parent_docs:
-                source_docs = self._source_chunks.get(str(source_key), [])
-                if source_docs:
-                    start_index = max(0, int(chunk_index) - max(0, fallback_window_size))
-                    end_index = int(chunk_index) + max(0, fallback_window_size) + 1
-                    parent_docs = source_docs[start_index:end_index]
-                    parent_docs = self._select_centered_window(parent_docs, int(chunk_index), max_parent_chunks)
+                source_all_docs = self._source_chunks.get(str(source_key), [])
+                if source_all_docs:
+                    start_idx = max(0, int(chunk_index) - fallback_window_size)
+                    end_idx = int(chunk_index) + fallback_window_size + 1
+                    sub_docs = source_all_docs[start_idx:end_idx]
+                    parent_docs = self._select_centered_window(sub_docs, int(chunk_index), max_parent_chunks)
                     resolution = "window"
 
-            if not parent_docs:
-                unique_key = get_doc_key(doc)
-                if unique_key in seen:
-                    continue
-                seen.add(unique_key)
-                expanded.append(doc)
-                continue
-
-            for parent_doc in parent_docs:
-                unique_key = get_doc_key(parent_doc)
-                if unique_key in seen:
-                    continue
-                seen.add(unique_key)
-                expanded.append(
-                    self._clone_with_retrieval_metadata(
-                        parent_doc,
+            # 3. 合并结果并注入继承的元数据
+            target_list = parent_docs if parent_docs else [doc]
+            for p_doc in target_list:
+                u_key = get_doc_key(p_doc)
+                if u_key not in seen:
+                    seen.add(u_key)
+                    expanded.append(self._clone_with_retrieval_metadata(
+                        p_doc,
                         retrieval_anchor_source_key=str(source_key),
                         retrieval_anchor_chunk_index=int(chunk_index),
                         retrieval_parent_resolution=resolution,
                         retrieval_parent_header_path=parent_header,
-                        is_retrieval_anchor=int(parent_doc.metadata.get("chunk_index", -1)) == int(chunk_index),
-                    )
-                )
+                        rerank_score=r_score,
+                        fusion_score=f_score,
+                        is_retrieval_anchor=int(p_doc.metadata.get("chunk_index", -1)) == int(chunk_index)
+                    ))
 
-        expanded.sort(
-            key=lambda item: (
-                str(item.metadata.get("source_key", "")),
-                int(item.metadata.get("chunk_index", 0)),
-            )
-        )
+        expanded.sort(key=lambda x: (str(x.metadata.get("source_key", "")), int(x.metadata.get("chunk_index", 0))))
         return expanded
 
 
+# 导出单例对象
 knowledge_corpus = KnowledgeCorpusManager()

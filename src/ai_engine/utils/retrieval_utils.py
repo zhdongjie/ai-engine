@@ -3,6 +3,7 @@ import asyncio
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Tuple
 
+from ai_engine.core.kb_manager import kb_manager
 from ai_engine.core.logger import logger
 from ai_engine.core.settings import settings
 from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
@@ -19,10 +20,15 @@ def get_source_key(doc) -> str:
     return str(metadata.get("file_name", "unknown"))
 
 
-def resolve_retrieval_runtime_config(retrieval_config: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    config = retrieval_config or {}
+def resolve_retrieval_runtime_config(biz_type: str = "normal_chat") -> Dict[str, Any]:
+    kb_config = kb_manager.get_kb_config(biz_type)
+
+    config = {
+        **kb_config.get("retrieval", {}),
+        **kb_config.get("context_assembly", {})
+    }
     return {
-        "search_k": config.get("k", settings.VECTOR_SEARCH_TOP_K),
+        "search_k": config.get("search_k", settings.VECTOR_SEARCH_TOP_K),
         "lexical_k": config.get("lexical_k", settings.LEXICAL_SEARCH_TOP_K),
         "enable_query_transform": config.get(
             "enable_query_transform",

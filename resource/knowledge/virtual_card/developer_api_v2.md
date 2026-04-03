@@ -18,3 +18,5 @@
   - `0`: 正常 (Active)
   - `1`: 已锁定 (Locked)
   - `2`: 已注销 (Terminated)
+  - `3`: 已挂失 (Lost)
+  - `4`: 已补办 (Replaced)

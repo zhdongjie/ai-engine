@@ -8,6 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from ai_engine.chains.common.llm_runner import stream_llm_response
 from ai_engine.chains.common.query_transformer import transform_queries
 from ai_engine.chains.rag_plugins import get_rag_plugins
+from ai_engine.core.kb_manager import kb_manager
 from ai_engine.core.logger import logger
 from ai_engine.core.prompt_manager import get_prompt_config
 from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
@@ -29,11 +30,21 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
     user_input = input_data.get("input", "")
     history = input_data.get("history", [])
 
+    user_level = input_data.get("user_level", "default")
     configurable = config.get("configurable") or {}
     user_lang = configurable.get("lang", "zh")
-    prompt_data = get_prompt_config(biz_type)
-    retrieval_config = prompt_data.get("retrieval_config", {})
-    runtime_config = resolve_retrieval_runtime_config(retrieval_config)
+
+    kb_config = kb_manager.get_kb_config(biz_type)
+    prompt_config = kb_config.get("prompt", biz_type)
+
+    if isinstance(prompt_config, dict):
+        prompt_name = prompt_config.get(user_level, prompt_config.get("default", biz_type))
+    else:
+        prompt_name = prompt_config
+
+    prompt_data = get_prompt_config(prompt_name)
+
+    runtime_config = resolve_retrieval_runtime_config(biz_type)
 
     queries = [user_input]
     if runtime_config["enable_query_transform"]:
@@ -173,17 +184,19 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
         if new_biz_type != biz_type:
             biz_type = new_biz_type
             logger.info(f"Switching prompt template to [{biz_type}] based on retrieval result")
-            prompt_data = get_prompt_config(biz_type)
+            new_kb_config = kb_manager.get_kb_config(biz_type)
+            new_prompt_name = new_kb_config.get("prompt", biz_type)
+            prompt_data = get_prompt_config(new_prompt_name)
 
     async for chunk in stream_llm_response(
-        user_input=user_input,
-        history=history,
-        biz_type=biz_type,
-        prompt_data=prompt_data,
-        context=context,
-        extra_data=extra_data,
-        sources=sources,
-        config=config,
-        intent="RAG",
+            user_input=user_input,
+            history=history,
+            biz_type=biz_type,
+            prompt_data=prompt_data,
+            context=context,
+            extra_data=extra_data,
+            sources=sources,
+            config=config,
+            intent="RAG",
     ):
         yield chunk

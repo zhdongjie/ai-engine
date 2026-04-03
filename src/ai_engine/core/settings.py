@@ -43,10 +43,12 @@ class Settings(BaseSettings):
     CHROMA_DATA_DIR: str = Field(default="data/chroma_data", description="ChromaDB 本地持久化目录")
     PROMPTS_DATA_DIR: str = Field(default="resource/prompts", description="Prompt 提示词模板统一存放目录")
     KNOWLEDGE_DATA_DIR: str = Field(default="resource/knowledge", description="RAG 业务知识库源文件存放目录")
+    KNOWLEDGE_BASE_DATA_DIR: str = Field(default="resource/kb", description="RAG 领域知识库源文件存放目录")
 
     # ===============================
     # LLM 与大模型配置
     # ===============================
+    EMBEDDING_PROVIDER: str = Field(default="qwen", description="")
     QWEN_API_KEY: SecretStr | None = Field(default=None, description="Qwen AI API Key (敏感信息)")
     QWEN_API_BASE: str | None = Field(default=None, description="Qwen API 代理/请求地址")
     QWEN_MODEL_LLM: str = Field(default="qwen-plus", description="用于主干对话与 RAG 生成的大模型名称")
@@ -113,7 +115,7 @@ class Settings(BaseSettings):
     # 向量数据库引擎切换
     # ===============================
     VECTOR_STORE_TYPE: str = Field(default="postgresql", description="向量数据库引擎: 'chroma' 或 'postgresql'")
-    INIT_KNOWLEDGE_BASE: bool = Field(default=False, description="是否在服务启动时强制重新初始化知识库")
+    KB_INIT_MODE: str = Field(default="skip",description="服务启动时知识库初始化模式：跳过、覆盖、增量")
 
     # ===============================
     # 动态路径与连接串计算
@@ -149,6 +151,13 @@ class Settings(BaseSettings):
         if os.path.isabs(self.KNOWLEDGE_DATA_DIR):
             return self.KNOWLEDGE_DATA_DIR
         return os.path.join(self.project_root_dir, self.KNOWLEDGE_DATA_DIR)
+
+    @property
+    def knowledge_base_dir(self) -> str:
+        """计算 KnowledgeBase 模板存储的绝对路径"""
+        if os.path.isabs(self.KNOWLEDGE_BASE_DATA_DIR):
+            return self.KNOWLEDGE_BASE_DATA_DIR
+        return os.path.join(self.project_root_dir, self.KNOWLEDGE_BASE_DATA_DIR)
 
     def get_prompt_path(self, filename: str) -> str:
         """获取具体某个 Prompt 文件的路径"""

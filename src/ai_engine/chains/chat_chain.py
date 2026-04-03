@@ -29,9 +29,11 @@ def get_session_history(
         tenant_id: str,
         user_id: str,
         lang: str,
+        user_level: str,
 ) -> BaseChatMessageHistory:
     try:
         _ = lang
+        _ = user_level
         uuid.UUID(session_id)
         valid_session_id = session_id
     except ValueError:
@@ -82,6 +84,14 @@ chat_chain = RunnableWithMessageHistory(
             name="Language",
             description="I18n language code for knowledge retrieval (e.g., zh, en, cht)",
             default="zh",
+            is_shared=True
+        ),
+        ConfigurableFieldSpec(
+            id="user_level",
+            annotation=str,
+            name="User Level",
+            description="User expertise level for selecting specific prompts (e.g., simple, expert, default)",
+            default="default",
             is_shared=True
         ),
     ]

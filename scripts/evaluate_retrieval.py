@@ -96,8 +96,7 @@ def _safe_average(values: List[float | None]) -> float | None:
 async def _run_case(case: Dict[str, Any], diagnostics_limit: int) -> Dict[str, Any]:
     biz_type = case.get("biz_type", "normal_chat")
     user_lang = case.get("lang", "zh")
-    prompt_data = get_prompt_config(biz_type)
-    runtime_config = resolve_retrieval_runtime_config(prompt_data.get("retrieval_config", {}))
+    runtime_config = resolve_retrieval_runtime_config(biz_type)
 
     queries = [case["query"]]
     if runtime_config["enable_query_transform"]:

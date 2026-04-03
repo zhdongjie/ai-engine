@@ -96,7 +96,43 @@ BEFORE UPDATE ON chat_messages
 FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 
 
--- [4] 额外预留：向量表说明
+-- [4] 📚 核心实体：knowledge_document_sync (知识库增量同步追踪)
+-- 描述：记录本地知识库文件与向量数据库的同步状态，支持 MD5 增量比对更新
+CREATE TABLE IF NOT EXISTS knowledge_document_sync (
+    -- 基础元数据 (完美对齐你的 Mixin 架构)
+    id             UUID PRIMARY KEY,
+    tenant_id      VARCHAR(36) NOT NULL,                                     -- 多租户隔离 ID
+    created_at     TIMESTAMP WITH TIME ZONE DEFAULT (NOW() AT TIME ZONE 'utc') NOT NULL,
+    updated_at     TIMESTAMP WITH TIME ZONE DEFAULT (NOW() AT TIME ZONE 'utc') NOT NULL,
+    is_deleted     BOOLEAN DEFAULT FALSE NOT NULL,                           -- 软删除标识
+
+    -- 操作审计
+    created_by     VARCHAR(255),                                             -- 记录由哪个管理员/用户触发的灌库
+    updated_by     VARCHAR(255),
+
+    -- 核心业务字段
+    path_md5       VARCHAR(64) NOT NULL UNIQUE,                              -- 文件绝对路径的MD5 (唯一物理标识)
+    file_path      VARCHAR(1024) NOT NULL,                                   -- 完整文件路径
+    biz_type       VARCHAR(128) NOT NULL,                                    -- 业务归属 (如: java_tutor, virtual_card)
+    content_hash   VARCHAR(64) NOT NULL,                                     -- 文件内容的 MD5 (用于判定是否被修改)
+    chunk_count    INTEGER DEFAULT 0 NOT NULL                                -- 该文档被切分出的 chunk 数量
+);
+
+-- 知识库追踪表索引优化
+-- 1. 业务高频查询：根据路径 MD5 查状态，且需排除软删除
+CREATE INDEX IF NOT EXISTS idx_kb_sync_lookup ON knowledge_document_sync(path_md5, is_deleted);
+-- 2. 租户与业务分类查询：用于后台管理系统统计知识库量级
+CREATE INDEX IF NOT EXISTS idx_kb_sync_tenant_biz ON knowledge_document_sync(tenant_id, biz_type);
+-- 3. 审计溯源：用于追踪哪些文件是谁操作的
+CREATE INDEX IF NOT EXISTS idx_kb_sync_created_by ON knowledge_document_sync(created_by);
+
+-- 绑定更新触发器 (复用你第一步定义的公共函数)
+CREATE TRIGGER trigger_update_knowledge_sync_at
+BEFORE UPDATE ON knowledge_document_sync
+FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+
+
+-- [5] 额外预留：向量表说明
 /* 注：langchain_pg_embedding 和 langchain_pg_collection 将由 init_knowledge_db.py 
 利用 langchain_postgres 驱动在运行时动态创建。
 如果需要手动预创建特定 Schema，可在此处追加 DDL。

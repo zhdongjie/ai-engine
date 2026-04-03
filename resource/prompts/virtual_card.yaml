@@ -6,9 +6,6 @@ config:
   temperature: 0
   max_tokens: 1000
 
-retrieval_config:
-  k: 3
-
 content: |
   你是一个专业的虚拟信用卡业务助手。
   请根据以下业务知识回答用户的问题：

@@ -1,0 +1,28 @@
+name: "java_tutor"
+description: "Java编程导师知识库，解答Java基础知识、环境配置、代码编写等技术问题。"
+keywords:
+  - java
+  - jvm
+  - spring
+  - 代码
+
+# 多级别 Prompt 路由
+prompt:
+  default: "java_tutor_default"   # 标准模式
+  simple: "java_tutor_simple"     # 新手保姆模式
+  expert: "java_tutor_expert"     # 资深架构师模式
+
+# 多语言数据源路由
+knowledge_path:
+  zh: "java_tutor/zh"
+  en: "java_tutor/en"
+  cht: "java_tutor/cht"
+
+# 针对代码场景的检索增强策略
+retrieval:
+  search_k: 8
+  lexical_k: 5
+
+context_assembly:
+  enable_context_enrichment: true
+  context_window_size: 3
