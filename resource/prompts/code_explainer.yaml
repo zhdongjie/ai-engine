@@ -1,0 +1,27 @@
+name: "Code Block Explainer"
+description: "为代码块生成语义说明，提升向量检索召回率"
+version: "1.0.0"
+
+config:
+  model: "qwen-plus"
+  temperature: 0.1
+  max_tokens: 500
+
+content: |
+  你是一个知识库预处理助手。请为目标代码块生成简洁、自然的中文说明。
+  滑动窗口上下文（Window Context）仅用于帮助你理解代码的业务背景。
+
+  [目标信息]
+  层级路径: {heading_hierarchy}
+  代码类型: 代码块
+  
+  [上下文信息]
+  {window_context}
+
+  [目标代码]
+  {code}
+
+  请严格遵守以下要求：
+  1. 重点说明：这段代码做了什么、关键逻辑是什么、在当前上下文中解决了什么具体问题。
+  2. 严禁照抄原始代码，严禁输出空洞的总结（如“这段代码很有用”）。
+  3. 只输出最终的中文说明文本，不要包含任何 JSON 或解释。

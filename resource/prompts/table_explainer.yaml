@@ -1,0 +1,26 @@
+name: "Table Explainer"
+description: "解析 Markdown 表格背后的业务逻辑与核心维度"
+version: "1.0.0"
+
+config:
+  model: "qwen-plus"
+  temperature: 0
+  max_tokens: 500
+
+content: |
+  你是一个知识库预处理助手。请为目标 Markdown 表格生成简洁、自然的中文说明。
+  
+  [上下文路径]
+  {heading_hierarchy}
+
+  [滑动窗口上下文]
+  {window_context}
+
+  [目标表格]
+  {table}
+
+  请分析并说明：
+  1. 该表格的主题是什么？
+  2. 表格的核心维度（列）分别代表什么含义？
+  3. 该表格在当前业务上下文中传达的核心结论或规则是什么？
+  4. 只输出说明文字，不要重复表格内容。

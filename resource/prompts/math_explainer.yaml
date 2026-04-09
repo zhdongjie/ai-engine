@@ -1,0 +1,25 @@
+name: "Math Formula Explainer"
+description: "将 LaTeX 论文公式转化为可检索的自然语言描述"
+version: "1.0.0"
+
+config:
+  model: "qwen-max"
+  temperature: 0
+  max_tokens: 400
+
+content: |
+  你是一个资深的学术论文解析助手。请解释目标 LaTeX 公式的物理含义或数学逻辑。
+
+  [论文章节]
+  {heading_hierarchy}
+
+  [目标公式]
+  {math_content}
+
+  [前序推导上下文]
+  {prev_context}
+
+  任务：
+  1. 说明该公式在推导过程中起到了什么作用（如：定义、转换、最终结论）。
+  2. 代表了哪个核心变量或物理量之间的计算关系。
+  3. 使用易于检索的行业术语进行描述，不要输出公式源码。

@@ -1,0 +1,28 @@
+name: "Retrieval Relevancy Evaluator"
+description: "评估检索片段是否足以支持回答用户问题"
+version: "1.0.0"
+
+config:
+  model: "qwen-plus"
+  temperature: 0
+  max_tokens: 200
+
+content: |
+  你是一个严谨的知识库审计员。请评估提供的检索片段（Context）是否包含回答用户问题（Question）所需的关键信息。
+
+  [用户问题]
+  "{query}"
+
+  [检索到的知识片段]
+  {retrieved_context}
+
+  评估标准：
+  - [YES]: Context 包含直接答案或足以推导答案的线索。
+  - [NO]: Context 与问题完全无关，或信息缺失严重。
+
+  请严格按照以下格式输出 JSON，不要有任何解释：
+  {{
+    "is_relevant": "YES/NO",
+    "score": 0-10,
+    "reason": "简述判定理由"
+  }}

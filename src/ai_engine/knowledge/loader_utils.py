@@ -172,7 +172,16 @@ def enrich_chunk_metadata(
     total_chunks = len(docs)
 
     for index, doc in enumerate(docs):
-        header_path = build_header_path(doc.metadata)
+        # 1. 提取结构化标题层级
+        hierarchy = []
+        for i in range(1, 4):
+            header_value = doc.metadata.get(f"Header {i}")
+            if header_value:
+                hierarchy.append(header_value.strip())
+
+        header_path = " > ".join(hierarchy) if hierarchy else ""
+
+        # 2. 更新元数据
         doc.metadata.update(
             {
                 "biz_type": biz_type,
@@ -182,12 +191,18 @@ def enrich_chunk_metadata(
                 "chunk_index": index,
                 "chunk_total": total_chunks,
                 "header_path": header_path,
+                "heading_hierarchy": hierarchy,
                 "chunk_strategy": chunk_strategy,
             }
         )
 
+        # 3. 检索内容增强
         if header_path:
-            doc.page_content = f"[Section] {header_path}\n{doc.page_content}"
+            prefix = f"[Context: {header_path}]\n"
+            if doc.metadata.get("contains_math"):
+                prefix = f"[Context (Contains Math): {header_path}]\n"
+
+            doc.page_content = f"{prefix}{doc.page_content}"
 
 
 def group_documents_by_source(docs: List[Document]) -> DefaultDict[str, List[Document]]:
