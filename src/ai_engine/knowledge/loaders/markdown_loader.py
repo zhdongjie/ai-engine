@@ -1,4 +1,5 @@
 # src/ai_engine/knowledge/loaders/markdown_loader.py
+import asyncio
 import re
 import uuid
 from pathlib import Path
@@ -105,7 +106,7 @@ class MarkdownProtector:
         return doc
 
 
-def process_markdown(
+async def process_markdown(
         biz_dir: Path, biz_type: str, lang: str, processor,
         text_splitter: RecursiveCharacterTextSplitter,
         markdown_splitter: MarkdownHeaderTextSplitter, mode: str
@@ -113,11 +114,11 @@ def process_markdown(
     docs = []
     for markdown_path in biz_dir.glob("**/*.md"):
         try:
-            action = sync_tracker.inspect_document(markdown_path, biz_type)
+            action = await sync_tracker.inspect_document(markdown_path, biz_type)
             if mode == "incremental" and action == "skip":
                 continue
 
-            content = markdown_path.read_text(encoding="utf-8")
+            content = await asyncio.to_thread(markdown_path.read_text, encoding="utf-8")
             path_md5 = sync_tracker.get_path_md5(markdown_path)
             extracted_meta = {"lang": lang, "path_md5": path_md5}
 

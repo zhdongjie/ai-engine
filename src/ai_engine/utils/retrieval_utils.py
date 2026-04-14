@@ -103,12 +103,17 @@ async def semantic_search(query: str, search_k: int, user_lang: str) -> List:
         "filter": {"lang": user_lang},
     }
     retriever = vdb_manager.store.as_retriever(search_kwargs=search_kwargs)
-    docs = await asyncio.to_thread(retriever.invoke, query)
+    if hasattr(retriever, "ainvoke"):
+        docs = await retriever.ainvoke(query)
+    else:
+        docs = await asyncio.to_thread(retriever.invoke, query)
 
     if docs:
         return docs
 
     fallback_retriever = vdb_manager.store.as_retriever(search_kwargs={"k": search_k})
+    if hasattr(fallback_retriever, "ainvoke"):
+        return await fallback_retriever.ainvoke(query)
     return await asyncio.to_thread(fallback_retriever.invoke, query)
 
 
@@ -125,8 +130,9 @@ async def collect_candidate_documents(
 
     lexical_result_sets = []
     if enable_lexical_retrieval:
-        for query in queries:
-            lexical_result_sets.append(await asyncio.to_thread(knowledge_corpus.keyword_search, query, lexical_k))
+        lexical_result_sets = await asyncio.gather(
+            *[knowledge_corpus.keyword_search(query, lexical_k) for query in queries]
+        )
 
     candidate_sets = [*semantic_result_sets, *lexical_result_sets]
     if len(candidate_sets) > 1:

@@ -49,7 +49,7 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
 
     queries = [user_input]
     if runtime_config["enable_query_transform"]:
-        queries = transform_queries(user_input=user_input, history=history, config=config)
+        queries = await transform_queries(user_input=user_input, history=history, config=config)
     logger.info(f"RAG queries prepared: {queries}")
 
     candidate_docs = await collect_candidate_documents(
@@ -110,7 +110,7 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
 
     parent_context_used = False
     if runtime_config["enable_small_to_big_retrieval"] and anchor_docs:
-        final_docs = knowledge_corpus.expand_to_parent_context(
+        final_docs = await knowledge_corpus.expand_to_parent_context(
             anchor_docs,
             max_parent_chunks=runtime_config["small_to_big_max_parent_chunks"],
             fallback_window_size=runtime_config["small_to_big_fallback_window_size"],
@@ -118,7 +118,7 @@ async def dynamic_rag_run(input_data: Dict[str, Any], config: RunnableConfig) ->
         parent_context_used = bool(final_docs)
         logger.info(f"Small-to-Big retrieval expanded context to {len(final_docs)} chunks")
     elif runtime_config["enable_context_enrichment"] and anchor_docs:
-        final_docs = knowledge_corpus.expand_with_neighbors(anchor_docs, runtime_config["context_window_size"])
+        final_docs = await knowledge_corpus.expand_with_neighbors(anchor_docs, runtime_config["context_window_size"])
         logger.info(f"Context enrichment expanded retrieval to {len(final_docs)} chunks")
     else:
         final_docs = anchor_docs

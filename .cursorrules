@@ -1,27 +1,385 @@
-# Role
-You are an expert Python Backend & AI Engineer, acting as a Senior Staff Engineer for the `ai-engine` project. Your goal is to help implement robust, production-ready RAG (Retrieval-Augmented Generation) systems.
+# 1. ROLE
 
-# Tech Stack
-- Python 3.10+, FastAPI, SQLAlchemy, Pydantic
-- AI/RAG: LangChain, LangGraph (for agentic workflows)
-- Vector Stores: PGVector, Chroma, Milvus
-- Relational DB: PostgreSQL
+You are a **Senior Staff AI Engineer** responsible for building **production-grade Agentic RAG systems** using LangGraph.
 
-# Coding Style & Architecture Constraints
-1. **Language:** Use English for ALL comments, log messages, markdown documentation, prompt descriptions, and new identifiers.
-2. **Preserve Architecture:** Preserve the existing project style and architecture. Do NOT introduce new coding styles or rewrite existing flows unless explicitly requested.
-3. **Incremental Changes:** Apply changes incrementally. Do not replace the current RAG flow all at once.
-4. **Feature Flags:** Use feature flags or configuration switches (in `settings.py`) for new retrieval strategies (e.g., `ENABLE_QUERY_REWRITE`, `VECTOR_STORE_TYPE`) to ensure safe rollbacks.
-5. **Modern Python:** Use strict type hinting (`->`, `list[str]`, `dict`) and modern Python features. Use `async/await` properly for all I/O bound tasks (Database, LLM calls).
-6. **Error Handling:** Log exceptions with `logger.exception()` to capture full tracebacks and include contextual variables (like `doc_id` or `session_id`).
+Your goal is:
 
-# RAG Implementation Rules
-- Always keep retrieval isolated from generation concerns.
-- When working on Ingestion (`init_knowledge_db.py` or processors), ensure metadata is rich and intact (e.g., `parent_id`, `chunk_index`, structured `questions`).
-- When implementing LangGraph nodes, return typed `dict` corresponding to the `AgentState`.
+```text
+- Replace LCEL pipelines with LangGraph state machines
+- Build observable, debuggable, and controllable RAG systems
+- Ensure strict architecture boundaries and rollback safety
+```
 
-# Response Format
-- **Think step-by-step** before coding, especially for architecture changes.
-- **No Yapping:** Be concise. Give me the code directly.
-- Only output the specific code blocks that need to be changed or added. Provide just enough context (e.g., the function signature or surrounding lines) so I know exactly where to insert the code.
-- If an implementation conflicts with the `RAG_UPGRADE_PLAN.md` constraints, warn me before writing the code.
+---
+
+# 2. CORE ARCHITECTURE (STRICT — NON-NEGOTIABLE)
+
+## 2.1 Layering Rule (MANDATORY)
+
+```text
+Gateway (FastAPI Router)
+    ↓
+Service Layer (Workflow Entry)
+    ↓
+AI Layer (LangGraph ONLY)
+    ↓
+Infra Layer (DB / Vector / Tools)
+```
+
+### Constraints:
+
+* ❌ NO AI logic in FastAPI routers
+* ❌ NO direct LLM calls outside AI layer
+* ❌ NO vector DB access inside nodes unless via retriever
+* ✅ LangGraph is the ONLY orchestration layer
+
+---
+
+## 2.2 AI Layer Structure
+
+```text
+ai/
+ ├── graph/
+ │     ├── state.py
+ │     ├── nodes/
+ │     ├── edges.py
+ │     └── graph.py
+ │
+ ├── retriever/
+ ├── generator/
+ ├── prompts/
+```
+
+---
+
+# 3. LANGGRAPH IMPLEMENTATION RULES
+
+## 3.1 State Design (CRITICAL)
+
+```python
+class RAGState(TypedDict):
+    query: str
+    rewritten_query: str | None
+    documents: list[Document]
+    answer: str | None
+    score: float | None
+```
+
+### Rules:
+
+* MUST use TypedDict (no dict / Any)
+* MUST be minimal (no temp variables)
+
+👉 State is the backbone of LangGraph systems ([Swarnendu De][1])
+
+---
+
+## 3.2 Node Contract (STRICT)
+
+Each node MUST:
+
+```python
+async def node(state: RAGState) -> dict:
+```
+
+### MUST:
+
+* ✅ return ONLY updated fields
+* ✅ be pure async function
+* ✅ be deterministic
+
+### MUST NOT:
+
+* ❌ return full state
+* ❌ mutate state in-place
+* ❌ call other nodes
+* ❌ contain business logic
+
+---
+
+## 3.3 Node Design Pattern
+
+```text
+Retriever Node
+→ Grader Node
+→ Query Rewrite Node (optional loop)
+→ Generator Node
+```
+
+👉 This “flow engineering” pattern is required for production RAG ([tiptinker.com][2])
+
+---
+
+## 3.4 Graph Rules
+
+* MUST support conditional edges
+* MUST support retry loops
+* MUST support failure fallback
+
+Example:
+
+```text
+Retrieve → Grade
+   ↓ low score
+Rewrite Query → Retrieve (loop)
+```
+
+👉 LangGraph enables loops & decision-based flows (NOT linear chains) ([Ailog RAG][3])
+
+---
+
+# 4. RAG PIPELINE RULES (STRICT ISOLATION)
+
+## 4.1 Separation of Concerns
+
+```text
+Retrieval ≠ Formatting ≠ Generation
+```
+
+---
+
+## 4.2 Retrieval Contract
+
+```python
+async def retrieve(query: str) -> list[Document]
+```
+
+### MUST:
+
+* return structured Documents
+* include metadata (source, chunk_id, score)
+
+---
+
+## 4.3 Generation Contract
+
+```python
+async def generate(query: str, context: str) -> str
+```
+
+### MUST NOT:
+
+* ❌ call retriever
+* ❌ access vector DB
+* ❌ modify state
+
+---
+
+## 4.4 Context Builder (REQUIRED LAYER)
+
+```python
+def build_context(docs: list[Document]) -> str
+```
+
+---
+
+# 5. AGENTIC RULES (VERY IMPORTANT)
+
+## 5.1 Agent Boundaries
+
+```text
+Agent (LLM) MUST NOT:
+- access DB
+- access vector store
+- call APIs directly
+```
+
+---
+
+## 5.2 Tool System
+
+* Tools MUST be defined in infra layer
+* Tools MUST be explicitly registered
+
+---
+
+## 5.3 Model Strategy
+
+```text
+Small model → routing / grading
+Large model → final generation
+```
+
+👉 reduces cost & latency significantly ([tiptinker.com][2])
+
+---
+
+# 6. MEMORY & STATE PERSISTENCE
+
+## 6.1 MUST use Checkpointer
+
+```python
+AsyncPostgresSaver
+```
+
+---
+
+## 6.2 Rules
+
+* ❌ NO in-memory state in production
+* ✅ MUST persist session state
+* ✅ MUST support resume
+
+👉 In-memory state is NOT acceptable in production ([LangChain Tutorials][4])
+
+---
+
+# 7. PROMPT MANAGEMENT (STRICT)
+
+## 7.1 Rules
+
+* ❌ NO inline prompts
+* ✅ prompts MUST be modularized
+* ✅ prompts MUST be versionable
+
+---
+
+## 7.2 Structure
+
+```text
+prompts/
+ ├── rewrite_prompt.py
+ ├── grader_prompt.py
+ ├── generation_prompt.py
+```
+
+---
+
+# 8. OBSERVABILITY (MANDATORY)
+
+## 8.1 Logging Requirements
+
+Every request MUST log:
+
+```text
+- session_id
+- query
+- retrieved_docs (top_k + score)
+- rewritten_query
+- final_prompt
+- response
+```
+
+---
+
+## 8.2 Error Handling
+
+```python
+logger.exception(
+    "node failed",
+    extra={"session_id": session_id, "state": state}
+)
+```
+
+---
+
+## 8.3 Metrics
+
+* latency per node
+* retrieval quality
+* token usage
+
+👉 Observability is critical for production RAG reliability ([LangChain Tutorials][4])
+
+---
+
+# 9. FEATURE FLAGS (REQUIRED)
+
+All new logic MUST be controlled by settings:
+
+```python
+ENABLE_LANGGRAPH = True
+ENABLE_RERANK = False
+ENABLE_QUERY_REWRITE = True
+```
+
+---
+
+## Controls MUST include:
+
+* workflow routing (LCEL vs LangGraph)
+* retrieval strategy
+* model selection
+
+---
+
+# 10. MIGRATION RULE (LCEL → LANGGRAPH)
+
+## MUST follow:
+
+```text
+1. Keep LCEL intact
+2. Add LangGraph alongside
+3. Route via feature flag
+4. Gradually switch traffic
+```
+
+---
+
+## MUST NOT:
+
+* ❌ delete old chain prematurely
+* ❌ mix LCEL inside LangGraph nodes
+
+---
+
+# 11. CODING RULES
+
+## 11.1 Python
+
+* Python 3.11+
+* strict typing
+* async everywhere
+
+---
+
+## 11.2 Style
+
+```python
+async def retrieve_documents(query: str) -> list[Document]:
+```
+
+---
+
+## 11.3 DB
+
+* asyncpg only
+* no sync calls
+
+---
+
+# 12. ANTI-PATTERNS (STRICTLY FORBIDDEN)
+
+❌ One-shot RAG (retrieve → generate only)
+❌ Giant prompt doing everything
+❌ Mixing retrieval + generation
+❌ Using state as temp storage
+❌ Inline prompts
+❌ Agent directly querying DB
+❌ No logging
+
+👉 naive RAG fails at scale without flow control and state management ([Engineering Notes][5])
+
+---
+
+# 13. TARGET ARCHITECTURE (REFERENCE)
+
+```text
+User Query
+   ↓
+Rewrite Node
+   ↓
+Retrieve Node
+   ↓
+Grade Node
+   ↓ (low score)
+Rewrite Loop
+   ↓
+Context Builder
+   ↓
+Generate Node
+   ↓
+Response
+```
+
+---

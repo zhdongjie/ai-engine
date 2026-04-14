@@ -1,4 +1,5 @@
 # src/ai_engine/knowledge/loaders/base_langchain_loader.py
+import asyncio
 import os
 from pathlib import Path
 from typing import List
@@ -17,7 +18,7 @@ from ai_engine.knowledge.loader_utils import (
 from ai_engine.knowledge.sync_tracker import sync_tracker
 
 
-def process_langchain_directory(
+async def process_langchain_directory(
         biz_dir: Path,
         biz_type: str,
         lang: str,
@@ -38,13 +39,13 @@ def process_langchain_directory(
             loader_cls=loader_cls,
             loader_kwargs=kwargs
         )
-        raw_docs = loader.load()
+        raw_docs = await asyncio.to_thread(loader.load)
 
         filtered_raw_docs = []
         for raw_doc in raw_docs:
             source_path = Path(str(raw_doc.metadata.get("source", "")))
 
-            action = sync_tracker.inspect_document(source_path, biz_type)
+            action = await sync_tracker.inspect_document(source_path, biz_type)
             if mode == "incremental" and action == "skip":
                 continue
 

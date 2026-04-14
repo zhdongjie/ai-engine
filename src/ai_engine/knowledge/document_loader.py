@@ -14,7 +14,7 @@ from ai_engine.knowledge.loaders.txt_loader import process_txt
 from ai_engine.knowledge.processors.factory import get_processor
 
 
-def load_documents() -> List[Document]:
+async def load_documents() -> List[Document]:
     markdown_splitter = build_markdown_splitter()
     text_splitter = build_text_splitter()
 
@@ -48,17 +48,17 @@ def load_documents() -> List[Document]:
 
             # 1. 解析 Markdown 文件
             all_docs.extend(
-                process_markdown(biz_dir, biz_type, lang, processor, text_splitter, markdown_splitter, mode)
+                await process_markdown(biz_dir, biz_type, lang, processor, text_splitter, markdown_splitter, mode)
             )
 
             # 2. 解析 TXT 文件
             all_docs.extend(
-                process_txt(biz_dir, biz_type, lang, processor, text_splitter, mode)
+                await process_txt(biz_dir, biz_type, lang, processor, text_splitter, mode)
             )
 
             # 3. 解析 PDF 文件
             all_docs.extend(
-                process_pdf(biz_dir, biz_type, lang, processor, text_splitter, mode)
+                await process_pdf(biz_dir, biz_type, lang, processor, text_splitter, mode)
             )
 
 

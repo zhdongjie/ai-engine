@@ -5,6 +5,7 @@ from langserve import add_routes
 from ai_engine.api.v1.chat_router import router as session_router
 from ai_engine.api.v1.system_router import router as system_router
 from ai_engine.chains.chat_chain import chat_chain
+from ai_engine.graphs.graph_chain import graph_chat_chain
 from ai_engine.core.constants import LANG_SERVE_ALLOWED_ENDPOINTS, API_V1_STR
 from ai_engine.core.lifespan import app_lifespan
 from ai_engine.core.openapi_config import setup_openapi
@@ -35,9 +36,11 @@ def create_app() -> FastAPI:
         enable_trace = False
 
     # 挂载 LangServe 核心路由
+    chat_runnable = graph_chat_chain if settings.ENABLE_LANGGRAPH else chat_chain
+
     add_routes(
         fastapi_app,
-        chat_chain,
+        chat_runnable,
         path=f"{API_V1_STR}/chat",
         enable_feedback_endpoint=enable_feedback,
         enable_public_trace_link_endpoint=enable_trace,

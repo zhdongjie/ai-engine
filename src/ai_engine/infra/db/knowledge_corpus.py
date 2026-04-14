@@ -1,4 +1,5 @@
 # src/ai_engine/infra/db/knowledge_corpus.py
+import asyncio
 from collections import defaultdict
 from copy import deepcopy
 from typing import Dict, Iterable, List, Tuple, Optional
@@ -21,6 +22,7 @@ class KnowledgeCorpusManager:
         self._doc_map: Dict[CorpusKey, Document] = {}
         self._source_chunks: Dict[str, List[Document]] = defaultdict(list)
         self._section_chunks: Dict[Tuple[str, str], List[Document]] = defaultdict(list)
+        self._load_lock = asyncio.Lock()
 
     @staticmethod
     def _clone_with_retrieval_metadata(doc: Document, **extra_metadata) -> Document:
@@ -58,7 +60,7 @@ class KnowledgeCorpusManager:
         return docs[start:end]
 
     @staticmethod
-    def _load_all_from_db() -> List[Document]:
+    async def _load_all_from_db() -> List[Document]:
         """直接从 PostgreSQL 向量表拉取所有已存储的切片"""
         sql = """
               SELECT e.document, e.cmetadata
@@ -68,8 +70,9 @@ class KnowledgeCorpusManager:
               """
         docs = []
         try:
-            with db_manager.engine.connect() as conn:
-                results = conn.execute(text(sql)).mappings().all()
+            async with db_manager.async_engine.connect() as conn:
+                result = await conn.execute(text(sql))
+                results = result.mappings().all()
                 for row in results:
                     docs.append(Document(
                         page_content=row['document'],
@@ -80,71 +83,75 @@ class KnowledgeCorpusManager:
             logger.error(f"从数据库提取 BM25 语料失败: {e}")
             return []
 
-    def _ensure_loaded(self) -> None:
-        """确保语料库和索引已加载到内存（懒加载模式）"""
+    async def _ensure_loaded(self) -> None:
+        """Ensure corpus documents and indexes are loaded (lazy loading)."""
         if self._documents is not None:
             return
 
-        logger.info("正在从数据库构建关键词检索索引和元数据映射...")
+        async with self._load_lock:
+            if self._documents is not None:
+                return
 
-        documents = self._load_all_from_db()
+            logger.info("Loading corpus documents from PostgreSQL...")
 
-        if not documents:
-            logger.warning("关键词索引构建跳过：数据库中未找到任何文档切片。")
-            self._bm25 = None
-            self._documents = []
-            return
+            documents = await self._load_all_from_db()
 
-        # 1. 构建 BM25 索引
-        try:
-            self._bm25 = BM25Retriever.from_documents(documents)
-            logger.info(f"成功构建 BM25 索引 (共 {len(documents)} 个文档)")
-        except Exception as e:
-            logger.error(f"构建 BM25 索引时出错: {e}")
-            self._bm25 = None
+            if not documents:
+                logger.warning("BM25 index build skipped: no documents found in DB.")
+                self._bm25 = None
+                self._documents = []
+                return
 
-        # 2. 填充元数据映射
-        self._doc_map.clear()
-        self._source_chunks.clear()
-        self._section_chunks.clear()
-        self._documents = documents
+            # 1. Build BM25 index
+            try:
+                self._bm25 = BM25Retriever.from_documents(documents)
+                logger.info(f"BM25 index built ({len(documents)} documents)")
+            except Exception as e:
+                logger.error(f"Failed to build BM25 index: {e}")
+                self._bm25 = None
 
-        for doc in documents:
-            metadata = doc.metadata or {}
-            # 兼容性处理：优先取 source_key，没有则取 path_md5
-            source_key = metadata.get("source_key") or metadata.get("path_md5")
-            chunk_index = metadata.get("chunk_index")
+            # 2. Build metadata maps
+            self._doc_map.clear()
+            self._source_chunks.clear()
+            self._section_chunks.clear()
+            self._documents = documents
 
-            if source_key is None or chunk_index is None:
-                continue
+            for doc in documents:
+                metadata = doc.metadata or {}
+                # Prefer source_key; fallback to path_md5
+                source_key = metadata.get("source_key") or metadata.get("path_md5")
+                chunk_index = metadata.get("chunk_index")
 
-            key = (str(source_key), int(chunk_index))
-            self._doc_map[key] = doc
-            self._source_chunks[str(source_key)].append(doc)
+                if source_key is None or chunk_index is None:
+                    continue
 
-            header_path = str(metadata.get("header_path", "")).strip()
-            if header_path:
-                self._section_chunks[(str(source_key), header_path)].append(doc)
+                key = (str(source_key), int(chunk_index))
+                self._doc_map[key] = doc
+                self._source_chunks[str(source_key)].append(doc)
 
-        # 3. 排序确保索引连续
-        for docs_list in self._source_chunks.values():
-            docs_list.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
-        for docs_list in self._section_chunks.values():
-            docs_list.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
+                header_path = str(metadata.get("header_path", "")).strip()
+                if header_path:
+                    self._section_chunks[(str(source_key), header_path)].append(doc)
 
-        logger.info(f"语料库加载完成，当前活跃切片总数: {len(documents)}")
+            # 3. Sort to keep ordering stable
+            for docs_list in self._source_chunks.values():
+                docs_list.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
+            for docs_list in self._section_chunks.values():
+                docs_list.sort(key=lambda item: int(item.metadata.get("chunk_index", 0)))
 
-    def keyword_search(self, query: str, top_k: int) -> List[Document]:
+            logger.info(f"Corpus loaded: {len(documents)} active chunks")
+
+    async def keyword_search(self, query: str, top_k: int) -> List[Document]:
         """执行 BM25 关键词检索"""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         if self._bm25 is None:
             return []
         self._bm25.k = top_k
         return list(self._bm25.invoke(query))
 
-    def expand_with_neighbors(self, docs: Iterable[Document], window_size: int) -> List[Document]:
+    async def expand_with_neighbors(self, docs: Iterable[Document], window_size: int) -> List[Document]:
         """基于 chunk_index 扩展相邻切片，并确保分数继承"""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         if window_size <= 0:
             return list(docs)
 
@@ -189,14 +196,14 @@ class KnowledgeCorpusManager:
         expanded.sort(key=lambda x: (str(x.metadata.get("source_key", "")), int(x.metadata.get("chunk_index", 0))))
         return expanded
 
-    def expand_to_parent_context(
+    async def expand_to_parent_context(
             self,
             docs: Iterable[Document],
             max_parent_chunks: int,
             fallback_window_size: int,
     ) -> List[Document]:
         """扩展到父级上下文（基于 Markdown 标题或物理窗口），并确保分数继承"""
-        self._ensure_loaded()
+        await self._ensure_loaded()
         expanded: List[Document] = []
         seen = set()
 

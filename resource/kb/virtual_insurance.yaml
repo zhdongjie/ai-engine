@@ -1,29 +1,11 @@
 name: "virtual_insurance"
+description: "Support for virtual insurance operations"
 
-description: "虚拟保险业务知识库，专门解答意外险、旅行险的理赔流程、保单状态查询、条款细则以及常见理赔 Q&A。"
+prompt: "virtual_insurance"
 
-keywords:
-  - 保险
-  - 虚拟保险
-  - 理赔
-  - 意外险
-  - 旅行险
-  - 报销
-  - 保单
+multi_rag:
+  targets:
+    - virtual_card
 
-prompt: "virtual_insurance"           # 指向 resource/prompts/virtual_insurance.yaml
-knowledge_path: "virtual_insurance"   # 指向 resource/knowledge/virtual_insurance/
-
-# --- 个性化检索策略 ---
-retrieval:
-  search_k: 5
-  lexical_k: 3
-
-context_assembly:
-  # 保险条款极其复杂，强烈建议开启“小到大”检索，召回父级完整段落
-  enable_small_to_big_retrieval: true
-  small_to_big_max_parent_chunks: 5
-
-  # 如果父级块太大，开启压缩防止 Token 爆炸
-  enable_context_compression: true
-  max_context_chunks: 15
+tool_agent:
+  enabled: false

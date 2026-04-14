@@ -28,7 +28,8 @@ dependencies = [
     "asyncpg (>=0.31.0,<0.32.0)",
     "langchain-postgres (>=0.0.17,<0.0.18)",
     "psycopg[binary,pool] (>=3.3.3,<4.0.0)",
-    "rank-bm25 (>=0.2.2,<0.3.0)"
+    "rank-bm25 (>=0.2.2,<0.3.0)",
+    "langgraph-checkpoint-postgres (>=3.0.5,<4.0.0)"
 ]
 
 [build-system]
@@ -39,3 +40,7 @@ build-backend = "poetry.core.masonry.api"
 name = "tsinghua"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
 priority = "primary"
+[dependency-groups]
+dev = [
+    "pytest (>=9.0.3,<10.0.0)"
+]

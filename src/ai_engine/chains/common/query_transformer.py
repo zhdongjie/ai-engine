@@ -45,7 +45,7 @@ def _format_history(history: List[Any], limit: int = 6) -> str:
     return "\n".join(lines) if lines else "No prior chat history."
 
 
-def transform_queries(
+async def transform_queries(
         user_input: str,
         history: List[Any],
         config: RunnableConfig | None = None,
@@ -68,7 +68,7 @@ def transform_queries(
     chain = prompt_template | llm | StrOutputParser()
 
     try:
-        raw_output = chain.invoke(
+        raw_output = await chain.ainvoke(
             {
                 "history": _format_history(history),
                 "user_input": user_input,

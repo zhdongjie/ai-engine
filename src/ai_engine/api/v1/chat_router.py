@@ -3,10 +3,10 @@ import uuid
 from typing import List, Dict, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_engine.infra.db.pgsql import db_manager
-from ai_engine.repository.chat_repository import ChatRepository
+from ai_engine.repository.chat_repository import AsyncChatRepository
 from ai_engine.schemas.chat_schemas import SessionItem
 from ai_engine.schemas.result import Result
 from ai_engine.core.constants import ResponseCode
@@ -41,11 +41,11 @@ async def get_user_id(x_user_id: str = Header(..., alias="X-User-Id")):
 )
 async def get_chat_sessions(
         user_id: str = Depends(get_user_id),
-        db: Session = Depends(db_manager.get_session)
+        db: AsyncSession = Depends(db_manager.get_async_session)
 ):
-    repo = ChatRepository(db)
+    repo = AsyncChatRepository(db)
     # 调用 repository 分页获取未被逻辑删除的会话
-    sessions = repo.get_user_sessions(user_id=user_id)
+    sessions = await repo.get_user_sessions(user_id=user_id)
     return Result.success(data=sessions)
 
 
@@ -59,15 +59,15 @@ async def get_chat_sessions(
 async def delete_chat_session(
         session_id: uuid.UUID,
         user_id: str = Depends(get_user_id),
-        db: Session = Depends(db_manager.get_session)
+        db: AsyncSession = Depends(db_manager.get_async_session)
 ):
-    repo = ChatRepository(db)
+    repo = AsyncChatRepository(db)
     # 鉴权：检查会话归属
-    session = repo.get_session(session_id)
+    session = await repo.get_session(session_id)
     if not session or session.user_id != user_id:
         return Result.fail(code=ResponseCode.NOT_FOUND.value, msg="会话不存在")
 
-    repo.delete_session(session_id)
+    await repo.delete_session(session_id)
     return Result.success(msg="会话已成功删除")
 
 
@@ -81,13 +81,13 @@ async def delete_chat_session(
 async def clear_session_memory(
         session_id: uuid.UUID,
         user_id: str = Depends(get_user_id),
-        db: Session = Depends(db_manager.get_session)
+        db: AsyncSession = Depends(db_manager.get_async_session)
 ):
-    repo = ChatRepository(db)
+    repo = AsyncChatRepository(db)
     # 鉴权：检查会话归属
-    session = repo.get_session(session_id)
+    session = await repo.get_session(session_id)
     if not session or session.user_id != user_id:
         return Result.fail(code=ResponseCode.NOT_FOUND.value, msg="会话不存在")
 
-    repo.clear_session_messages(session_id)
+    await repo.clear_session_messages(session_id)
     return Result.success(msg="记忆已成功清空")

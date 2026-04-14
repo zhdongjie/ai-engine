@@ -1,26 +1,10 @@
 name: "virtual_card"
+description: "Support for virtual card operations"
 
-description: "虚拟信用卡业务知识库，包含费率、限额（Fee & Limit）、卡片升级政策、安全协议以及开发者 API 接入指南。"
+prompt: "virtual_card"
 
-keywords:
-  - 虚拟卡
-  - 信用卡
-  - 费率
-  - 限额
-  - 升级政策
-  - 开发者 API
-  - 安全协议
+multi_rag:
+  targets:
+    - virtual_insurance
 
-prompt: "virtual_card"           # 指向 resource/prompts/virtual_card.yaml
-knowledge_path: "virtual_card"   # 指向 resource/knowledge/virtual_card/
-
-# --- 个性化检索策略 ---
-retrieval:
-  # 费率和限额等确切数据，需要更高的词法命中率
-  search_k: 6
-  lexical_k: 5
-
-context_assembly:
-  # 条款阅读通常需要上下文连贯，开启相邻上下文扩充
-  enable_context_enrichment: true
-  context_window_size: 2
+enable_tool_agent: false

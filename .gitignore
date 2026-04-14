@@ -73,6 +73,7 @@ Thumbs.db
 # 7. 测试与覆盖率报告
 # =========================
 .pytest_cache/
+pytest-cache-files-*/
 .tox/
 htmlcov/
 .coverage

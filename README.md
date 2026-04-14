@@ -1,54 +1,45 @@
-# ai-engine
+﻿# ai-engine
 
-**ai-engine** is a lightweight **AI execution engine** for running **LLM Chains, Agents, and Workflows as APIs**.
+ai-engine is a lightweight AI execution engine for running LLM chains, agents, and workflows as APIs.
 
-It is designed to expose **AI capabilities as microservices**, allowing applications to integrate LLM features through
-standard HTTP APIs.
-
-The engine focuses only on **AI inference and workflow execution**, leaving business logic, authentication, and
-orchestration to upstream services.
+It exposes AI capabilities as microservices, allowing applications to integrate LLM features through standard HTTP APIs.
+The engine focuses on AI inference and workflow execution, leaving business logic, authentication, and orchestration to
+upstream services.
 
 ---
 
-# ✨ Key Features
+# Key Features
 
-* Run **LLM Chains** as APIs
-* Build **Agent-based workflows**
-* Support **RAG pipelines**
-* Stream responses via HTTP
-* Deploy AI capabilities as **microservices**
-* Multi-provider LLM support
+- Run LLM chains as APIs
+- Build agent-based workflows
+- Support RAG pipelines
+- Stream responses via HTTP
+- Multi-provider LLM support
 
 ---
 
-# 🧠 Architecture
+# Architecture
 
-The system follows a **two-layer architecture**.
+The system follows a two-layer architecture.
 
 ```
 Client / App
-      │
-      │ HTTP
-      ▼
+    |
+   HTTP
+    v
 +------------------+
 |   AI Gateway     |
 |  (Business API)  |
 +---------+--------+
-          │
-          │
-          ▼
+          |
+          v
 +------------------+
 |    ai-engine     |
-|                  |
-|  Prompt Engine   |
-|  Chains          |
-|  Agents          |
-|  Workflows       |
-|  RAG Pipelines   |
+|  Chains/Agents   |
+|  Workflows/RAG   |
 +---------+--------+
-          │
-          │
-          ▼
+          |
+          v
 +------------------+
 |   LLM Providers  |
 | OpenAI / Zhipu   |
@@ -56,101 +47,83 @@ Client / App
 +------------------+
 ```
 
-### Responsibility Separation
+## Responsibility Separation
 
 | Component         | Responsibility                               |
 |-------------------|----------------------------------------------|
-| **ai-engine**     | AI inference and workflow execution          |
-| **Gateway / BFF** | Authentication, business APIs, orchestration |
+| ai-engine         | AI inference and workflow execution          |
+| Gateway / BFF     | Authentication, business APIs, orchestration |
 
-This separation keeps the AI layer **stateless, scalable, and reusable**.
-
----
-
-# 🛠 Tech Stack
-
-### Language
-
-Python **3.11+**
+This separation keeps the AI layer stateless, scalable, and reusable.
 
 ---
 
-### AI Frameworks
+# Tech Stack
 
-* LangChain
-* LangGraph
-* LangServe
+## Language
 
-LangServe automatically exposes **LangChain Runnable / Chains / Agents as REST APIs**.
+Python 3.11+
 
----
+## AI Frameworks
 
-### Web Framework
+- LangChain
+- LangGraph
+- LangServe
 
-* FastAPI
-* Uvicorn
+LangServe automatically exposes LangChain Runnable / Chains / Agents as REST APIs.
 
----
+## Web Framework
 
-### Storage
+- FastAPI
+- Uvicorn
 
-* PostgreSQL
-* pgvector
-* Redis
+## Storage
 
----
+- PostgreSQL
+- pgvector
+- Redis
 
-### Observability
+## Observability
 
-* LangSmith
+- LangSmith
 
----
+## DevOps
 
-### DevOps
-
-* Poetry
-* Docker
-* Docker Compose
+- Poetry
+- Docker
+- Docker Compose
 
 ---
 
-# 📦 Project Structure
+# Project Structure
 
 ```
-ai-engine
-│
-├── app
-│   │
-│   ├── chains          # LLM chains
-│   │
-│   ├── agents          # Agent implementations
-│   │
-│   ├── workflows       # LangGraph workflows
-│   │
-│   ├── prompts         # Prompt templates
-│   │
-│   ├── llm             # LLM provider abstraction
-│   │
-│   ├── infra           # Vector store / retriever
-│   │
-│   ├── server.py       # FastAPI entrypoint
-│   │
-│   └── config.py       # Configuration
-│
-├── tests
-│
-├── docker
-│
-├── pyproject.toml
-│
-└── README.md
+ai-engine/
+  src/ai_engine/
+    api/
+    chains/
+    core/
+    graphs/
+    infra/
+    knowledge/
+    models/
+    repository/
+    schemas/
+    utils/
+    server.py
+  tests/
+  resource/
+  scripts/
+  main.py
+  pyproject.toml
+  README.md
 ```
 
 ---
 
-# 🚀 Quick Start
+# Quick Start
 
-### 1 Install dependencies
+## 1 Install dependencies
 
 ```bash
 poetry install
@@ -162,128 +135,113 @@ Activate the virtual environment:
 poetry shell
 ```
 
----
+## 2 Configure environment
 
-### 2 Configure environment
-
-Create `.env`
+Create `.env` (or `.env.dev`):
 
 ```
-OPENAI_API_KEY=your-key
-MODEL_PROVIDER=openai
-MODEL_NAME=gpt-4o
+ENV=dev
+QWEN_API_KEY=your-key
 ```
 
----
+## 3 Start the server
 
-### 3 Start the server
-
-```
-poetry run python app/server.py
+```bash
+poetry run python main.py
 ```
 
-Server runs at:
-
-```
-http://localhost:8000
-```
+Server runs at `http://127.0.0.1:8000` by default (configurable via `PROJECT_HOST` / `PROJECT_PORT`).
 
 ---
 
-# 🔌 Example API
+# Example API
 
 Invoke a chain:
 
 ```
-POST /chat/invoke
+POST /v1/chat/invoke
 ```
 
 Example request:
 
-```
-curl http://localhost:8000/chat/invoke \
--H "Content-Type: application/json" \
--d '{"input": "hello"}'
-```
-
----
-
-### Streaming
-
-```
-POST /chat/stream
+```bash
+curl http://127.0.0.1:8000/v1/chat/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"input": "hello"}'
 ```
 
----
-
-### Batch
+## Streaming
 
 ```
-POST /chat/batch
+POST /v1/chat/stream
+```
+
+## Batch
+
+```
+POST /v1/chat/batch
 ```
 
 ---
 
-# 🧩 Example Server
+# Example Server
 
-```
+```python
 from fastapi import FastAPI
 from langserve import add_routes
-from app.chains.chat_chain import chat_chain
+from ai_engine.chains.chat_chain import chat_chain
 
 app = FastAPI()
 
 add_routes(
     app,
     chat_chain,
-    path="/chat"
+    path="/v1/chat",
 )
 ```
 
 This automatically generates:
 
 ```
-POST /chat/invoke
-POST /chat/stream
-POST /chat/batch
-POST /chat/playground
+POST /v1/chat/invoke
+POST /v1/chat/stream
+POST /v1/chat/batch
+POST /v1/chat/playground
 ```
 
 ---
 
-# 🗺 Roadmap
+# Roadmap
 
-* Chat Chain
-* RAG Engine
-* Agent Workflows
-* Tool Integration
-* Memory System
-* Multimodel support
-* Observability integration
-
----
-
-# 🐳 Docker (coming soon)
-
-The project will support containerized deployment using Docker.
+- Chat Chain
+- RAG Engine
+- Agent Workflows
+- Tool Integration
+- Memory System
+- Multi-model support
+- Observability integration
 
 ---
 
-# 📜 License
+# Docker
+
+```bash
+docker compose up --build
+```
+
+---
+
+# License
 
 MIT License
 
 ---
 
-# 💡 Philosophy
+# Philosophy
 
-**ai-engine focuses only on AI execution.**
+ai-engine focuses only on AI execution:
 
-* Business APIs → Gateway
-* AI inference → ai-engine
+- Business APIs -> Gateway
+- AI inference -> ai-engine
 
-This architecture keeps AI services:
-
-* modular
-* scalable
-* reusable
+This architecture keeps AI services modular, scalable, and reusable.

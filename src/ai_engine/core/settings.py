@@ -29,11 +29,21 @@ class Settings(BaseSettings):
     PROJECT_DESCRIPTION: str = Field(default="基于 LangServe 与 RAG 架构的底层能力支撑 API",
                                      description="项目描述，用于 OpenAPI 展示")
     PROJECT_VERSION: str = Field(default="0.1.0", description="项目版本号")
-    PROJECT_RELOAD: bool = Field(default=False, description="是否开启 Uvicorn 热重载")
     PROJECT_HOST: str = Field(default="127.0.0.1", description="服务监听绑定的 IP 地址")
     PROJECT_PORT: int = Field(default=8000, description="服务监听的端口")
     MAX_HISTORY_MESSAGES: int = Field(default=20, description="对话历史截断限制，防止上下文 Token 溢出")
     ENABLE_LANGSERVE_EXTRAS: bool = Field(default=False, description="是否开启 LangServe 辅助端点(playground等)")
+
+    # ===============================
+    # LangGraph Feature Flags
+    # ===============================
+    ENABLE_LANGGRAPH: bool = Field(default=False, description="Enable LangGraph workflow routing")
+    ENABLE_QUERY_REWRITE: bool = Field(default=True, description="Enable query rewrite in LangGraph")
+    ENABLE_RERANK: bool = Field(default=False, description="Enable rerank node in LangGraph")
+    LANGGRAPH_CHECKPOINTER: str = Field(default="memory", description="LangGraph checkpointer type (memory|postgres)")
+    ENABLE_OBS_LOGS: bool = Field(default=True, description="Enable observability logs for LangGraph workflow")
+    ENABLE_MULTI_RAG: bool = Field(default=False, description="Enable multi-RAG expansion across KBs")
+    ENABLE_TOOL_AGENT: bool = Field(default=False, description="Enable tool-agent branch in LangGraph workflow")
 
     # ===============================
     # 路径与目录配置
@@ -164,8 +174,16 @@ class Settings(BaseSettings):
         return os.path.join(self.prompt_dir, filename)
 
     @property
-    def sync_postgres_url(self):
-        return f"postgresql+psycopg://{self.PG_USER}:{self.PG_PASSWORD.get_secret_value()}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
+    def psycopg_dsn(self) -> str:
+        """Psycopg async DSN (for direct psycopg AsyncConnection)."""
+        password = self.PG_PASSWORD.get_secret_value() if self.PG_PASSWORD else ""
+        return f"postgresql://{self.PG_USER}:{password}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
+
+    @property
+    def sqlalchemy_async_url(self) -> str:
+        """SQLAlchemy async URL (asyncpg driver)."""
+        password = self.PG_PASSWORD.get_secret_value() if self.PG_PASSWORD else ""
+        return f"postgresql+asyncpg://{self.PG_USER}:{password}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
 
     # ===============================
     # 多环境级联加载

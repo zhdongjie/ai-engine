@@ -9,7 +9,7 @@ from ai_engine.core.prompt_manager import get_prompt_config
 from ai_engine.infra.llm.factory import get_llm_model
 
 
-def generate_session_title(user_content: str, config: RunnableConfig) -> str:
+async def generate_session_title(user_content: str, config: RunnableConfig) -> str:
     """
     根据用户首条消息自动生成会话标题
     """
@@ -41,7 +41,7 @@ def generate_session_title(user_content: str, config: RunnableConfig) -> str:
 
         chain = prompt_template | llm | StrOutputParser()
 
-        title = chain.invoke({"user_content": user_content}, config=config)
+        title = await chain.ainvoke({"user_content": user_content}, config=config)
 
         if isinstance(title, str):
             return title.replace('*', '').strip(' 。，、"\'”“\n\t')
