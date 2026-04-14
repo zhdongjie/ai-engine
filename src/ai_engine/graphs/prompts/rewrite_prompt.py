@@ -1,11 +1,13 @@
 from typing import Dict
 
+import json
+
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 
 from ai_engine.core.logger import logger
-from ai_engine.core.prompt_manager import get_prompt_config
+from ai_engine.graphs.prompts.loader import load_prompt
 from ai_engine.core.settings import settings
 from ai_engine.infra.llm.factory import get_llm_model
 
@@ -15,7 +17,7 @@ async def rewrite_query(query: str, history_text: str, config: RunnableConfig) -
     if not settings.ENABLE_QUERY_REWRITE:
         return query
 
-    prompt_data = get_prompt_config("retrieval_rewrite")
+    prompt_data = load_prompt("retrieval_rewrite")
     prompt_template = ChatPromptTemplate.from_messages(
         [
             ("system", prompt_data["content"]),
@@ -51,8 +53,6 @@ class DictParser:
     @staticmethod
     def parse(raw: str) -> Dict[str, object]:
         try:
-            import json
-
             return json.loads(raw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             return {}

@@ -1,24 +1,13 @@
-from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.config import get_config, get_stream_writer
+# src/ai_engine/graphs/nodes/generate.py
+from langgraph.config import get_config
 
-from ai_engine.chains.common.llm_runner import stream_llm_response
-from ai_engine.core.logger import logger
 from ai_engine.graphs.observability import (
     get_session_id,
-    log_final_prompt,
-    log_response,
-    log_token_usage,
     observe_node,
 )
 from ai_engine.graphs.generator.answer import resolve_prompt_data
+from ai_engine.graphs.nodes.llm_stream import stream_llm_answer
 from ai_engine.graphs.state import ChatGraphState
-
-
-def _safe_format_prompt(template: str, variables: dict) -> str:
-    try:
-        return template.format_map(variables)
-    except Exception:
-        return template
 
 
 async def generate_node(state: ChatGraphState) -> dict:
@@ -37,11 +26,7 @@ async def generate_node(state: ChatGraphState) -> dict:
 
     session_id = get_session_id(config)
     async with observe_node(session_id, "generate"):
-        writer = get_stream_writer()
-        answer_parts = []
-        response_metadata = {}
-
-        async for chunk in stream_llm_response(
+        return await stream_llm_answer(
             user_input=user_input,
             history=history,
             biz_type=biz_type,
@@ -51,41 +36,6 @@ async def generate_node(state: ChatGraphState) -> dict:
             sources=sources,
             config=config,
             intent="RAG",
-        ):
-            content = getattr(chunk, "content", "") or ""
-            if content:
-                answer_parts.append(content)
-                writer({"type": "llm_chunk", "content": content})
-
-            chunk_metadata = getattr(chunk, "additional_kwargs", None)
-            if isinstance(chunk_metadata, dict) and chunk_metadata.get("done"):
-                response_metadata = chunk_metadata
-
-        answer = "".join(answer_parts).strip()
-        updated_history = [*history, HumanMessage(content=user_input), AIMessage(content=answer)]
-
-        final_prompt = _safe_format_prompt(
-            prompt_data.get("content", ""),
-            {
-                "context": context,
-                "formatted_context": context,
-                "query": user_input,
-                "input": user_input,
-                **extra_data,
-            },
+            session_id=session_id,
+            node_label="generate",
         )
-
-        logger.info(f"[generate] session={session_id} final_prompt={final_prompt}")
-        logger.info(f"[generate] session={session_id} response={answer}")
-        log_final_prompt(session_id, final_prompt)
-        log_response(session_id, answer)
-        if isinstance(response_metadata, dict):
-            log_token_usage(session_id, response_metadata.get("usage_metadata"))
-
-        writer({"type": "final_chunk", "metadata": response_metadata})
-
-        return {
-            "final_answer": answer,
-            "history": updated_history,
-            "response_metadata": response_metadata,
-        }

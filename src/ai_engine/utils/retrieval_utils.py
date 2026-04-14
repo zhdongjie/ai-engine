@@ -1,7 +1,7 @@
 # src/ai_engine/utils/retrieval_utils.py
 import asyncio
 from collections import defaultdict
-from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Tuple
+from typing import Any, DefaultDict, Dict, Iterable, List, Sequence, Tuple, TypedDict
 
 from ai_engine.core.kb_manager import kb_manager
 from ai_engine.core.logger import logger
@@ -10,6 +10,16 @@ from ai_engine.infra.db.knowledge_corpus import knowledge_corpus
 from ai_engine.infra.db.vdb import vdb_manager
 from ai_engine.infra.llm.factory import call_rerank
 from ai_engine.utils.doc_utils import get_doc_key
+
+class RetrievalQuality(TypedDict):
+    doc_count: int
+    source_count: int
+    top_score: float
+    tail_score: float
+    score_gap: float
+    weak_reasons: List[str]
+    is_confident: bool
+    should_retry: bool
 
 
 def get_source_key(doc) -> str:
@@ -277,7 +287,7 @@ def get_reranked_docs(
         return initial_docs[:2]
 
 
-def assess_retrieval_quality(docs: Sequence) -> Dict[str, object]:
+def assess_retrieval_quality(docs: Sequence) -> RetrievalQuality:
     """Evaluate retrieval confidence before final generation."""
     unique_docs = dedupe_documents(docs)
     doc_count = len(unique_docs)

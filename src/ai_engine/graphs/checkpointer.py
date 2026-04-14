@@ -19,18 +19,13 @@ def _build_asyncpg_dsn() -> str:
 
 def _import_async_postgres_saver():
     try:
-        from langgraph_checkpoint.postgres import AsyncPostgresSaver  # type: ignore
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
         return AsyncPostgresSaver
-    except Exception:
-        try:
-            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
-
-            return AsyncPostgresSaver
-        except Exception as exc:
-            raise ImportError(
-                "AsyncPostgresSaver not found. Install `langgraph-checkpoint-postgres`."
-            ) from exc
+    except Exception as exc:
+        raise ImportError(
+            "AsyncPostgresSaver not found. Install `langgraph-checkpoint-postgres`."
+        ) from exc
 
 
 async def _maybe_await(value: Any) -> Any:

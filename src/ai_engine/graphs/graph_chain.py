@@ -70,7 +70,7 @@ class GraphChatChain(Runnable[ChatGraphState, AIMessageChunk]):
         output = await app.ainvoke(input, config=normalized, **kwargs)
         if isinstance(output, dict):
             return _final_chunk_from_state(output)
-        return AIMessageChunk(content=str(output))
+        return AIMessageChunk(**{"content": str(output)})
 
     async def astream(
         self,
@@ -91,13 +91,13 @@ class GraphChatChain(Runnable[ChatGraphState, AIMessageChunk]):
         ):
             if isinstance(chunk, dict) and chunk.get("type") == "llm_chunk":
                 content = chunk.get("content", "")
-                yield AIMessageChunk(content=content)
+                yield AIMessageChunk(**{"content": content})
             elif isinstance(chunk, dict) and chunk.get("type") == "final_chunk":
                 metadata = chunk.get("metadata")
                 if isinstance(metadata, dict):
-                    yield AIMessageChunk(content="", additional_kwargs=metadata)
+                    yield AIMessageChunk(**{"content": "", "additional_kwargs": metadata})
                 else:
-                    yield AIMessageChunk(content="")
+                    yield AIMessageChunk(**{"content": ""})
                 return
 
     async def astream_events(
@@ -142,7 +142,7 @@ class GraphChatChain(Runnable[ChatGraphState, AIMessageChunk]):
                         "run_id": run_id,
                         "tags": tags,
                         "metadata": metadata,
-                        "data": {"chunk": AIMessageChunk(content=content)},
+                        "data": {"chunk": AIMessageChunk(**{"content": content})},
                         "parent_ids": [],
                     }
             elif isinstance(chunk, dict) and chunk.get("type") == "final_chunk":
@@ -179,10 +179,10 @@ graph_chat_chain = GraphChatChain().with_types(input_type=ChatInput)
 
 def _final_chunk_from_state(state: Dict[str, Any]) -> AIMessageChunk:
     metadata = state.get("response_metadata") or {}
-    return AIMessageChunk(
-        content="",
-        additional_kwargs=metadata if isinstance(metadata, dict) else {},
-    )
+    return AIMessageChunk(**{
+        "content": "",
+        "additional_kwargs": metadata if isinstance(metadata, dict) else {},
+    })
 
 
 def _ensure_thread_id(config: RunnableConfig) -> None:

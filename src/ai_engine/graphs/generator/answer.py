@@ -1,3 +1,4 @@
+# src/ai_engine/graphs/generator/answer.py
 from typing import Any, Dict, List, Tuple
 
 from langchain_core.messages import AIMessageChunk
@@ -5,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ai_engine.chains.common.llm_runner import stream_llm_response
 from ai_engine.core.kb_manager import kb_manager
-from ai_engine.core.prompt_manager import get_prompt_config
+from ai_engine.graphs.prompts.loader import load_prompt
 
 
 def resolve_prompt_data(biz_type: str, user_level: str) -> Dict[str, Any]:
@@ -18,7 +19,7 @@ def resolve_prompt_data(biz_type: str, user_level: str) -> Dict[str, Any]:
     else:
         prompt_name = prompt_config
 
-    return get_prompt_config(prompt_name)
+    return load_prompt(prompt_name)
 
 
 async def generate_answer(

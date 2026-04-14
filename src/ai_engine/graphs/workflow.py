@@ -1,5 +1,6 @@
 from typing import AsyncIterator, Dict
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 
 from ai_engine.core.settings import settings
@@ -107,7 +108,7 @@ async def shutdown_graph_runtime() -> None:
 
 async def astream_graph_events(
     input_state: ChatGraphState,
-    config: dict,
+    config: RunnableConfig,
 ) -> AsyncIterator[Dict]:
     app = await get_graph_app()
     async for event in app.astream_events(input_state, config=config):

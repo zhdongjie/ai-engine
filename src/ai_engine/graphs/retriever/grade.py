@@ -6,7 +6,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableConfig
 
 from ai_engine.core.logger import logger
-from ai_engine.core.prompt_manager import get_prompt_config
+from ai_engine.graphs.prompts.loader import load_prompt
 from ai_engine.infra.llm.factory import get_llm_model
 from ai_engine.utils.retrieval_utils import (
     assess_retrieval_quality,
@@ -20,7 +20,7 @@ async def grade_retrieval(query: str, docs: list, config: RunnableConfig) -> Tup
     if not docs:
         return 0.0, True
 
-    prompt_data = get_prompt_config("retrieval_eval")
+    prompt_data = load_prompt("retrieval_eval")
     prompt = PromptTemplate.from_template(prompt_data["content"])
     llm = get_llm_model(prompt_data.get("config", {}))
     chain = prompt | llm | StrOutputParser()
